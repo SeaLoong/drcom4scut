@@ -1,5 +1,7 @@
 # drcom4scut
 
+> 当前版本  0.2.0
+
 + A 3rd DrCOM client for SCUT, written by Rust.
 + 华南理工大学第三方客户端，使用Rust语言编写。
 
@@ -102,4 +104,4 @@ data:   # (可选) 以下参数通常不需要填写，填写错误可能会导�
 
 ## 许可证
 
-[![GPLv3](https://img.shields.io/badge/License-GPLv3-blue.svg?longCache=true)](https://github.com/SeaLoong/drcom4scut/blob/master/LICENSE)
+[![LGPLv3](https://img.shields.io/badge/License-LGPLv3-blue.svg?longCache=true)](https://github.com/SeaLoong/drcom4scut/blob/master/LICENSE)
