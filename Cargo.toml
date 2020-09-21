@@ -1,0 +1,25 @@
+[package]
+name = "drcom4scut"
+version = "0.1.0"
+authors = ["SeaLoong <984391132@qq.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+rand = "0.7.3"
+lazy_static = "1.4.0"
+log = "0.4.11"
+log4rs = "0.13.0"
+chrono = "0.4"
+clap = "2"
+config = "0.10"
+bytes = "0.5"
+hex = "0.4"
+# tokio = { version = "0.2", features = ["full"] }
+pnet = "0.26.0"
+md-5 = "0.9.1"
+trust-dns-resolver = "0.19.5"
+hostname = "0.3.1"
+encoding_rs = "0.8.24"
+crossbeam = "0.7.3"

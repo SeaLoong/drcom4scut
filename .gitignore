@@ -1,0 +1,8 @@
+
+.idea
+
+#Added by cargo
+
+/target
+/logs
+config.yml
