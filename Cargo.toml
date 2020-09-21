@@ -1,6 +1,6 @@
 [package]
 name = "drcom4scut"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["SeaLoong <984391132@qq.com>"]
 edition = "2018"
 
@@ -16,7 +16,6 @@ clap = "2"
 config = "0.10"
 bytes = "0.5"
 hex = "0.4"
-# tokio = { version = "0.2", features = ["full"] }
 pnet = "0.26.0"
 md-5 = "0.9.1"
 trust-dns-resolver = "0.19.5"

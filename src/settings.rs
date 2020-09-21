@@ -24,7 +24,7 @@ pub struct Settings {
     pub time: NaiveTime,
     pub reconnect: i32,
     pub heartbeat: Heartbeat,
-    pub retry_interval: i32,
+    pub retry: Retry,
     pub log: Log,
     pub data: Data,
 }
@@ -45,7 +45,7 @@ impl Default for Settings {
             time: NaiveTime::from_hms(7, 0, 0),
             reconnect: 120,
             heartbeat: Heartbeat::default(),
-            retry_interval: 5000,
+            retry: Retry::default(),
             log: Log::default(),
             data: Data::default(),
         }
@@ -62,7 +62,7 @@ impl Default for Reconnect {
     fn default() -> Self {
         Reconnect {
             allowed_time: String::from("7:00"),
-            seconds: 120,
+            seconds: 60,
         }
     }
 }
@@ -78,6 +78,21 @@ impl Default for Heartbeat {
         Heartbeat {
             eap_timeout: 60,
             udp_timeout: 12,
+        }
+    }
+}
+
+#[derive(Debug, Hash, PartialEq, Eq, Clone)]
+pub struct Retry {
+    pub count: i32,
+    pub interval: i32,
+}
+
+impl Default for Retry {
+    fn default() -> Self {
+        Retry {
+            count: 2,
+            interval: 5000,
         }
     }
 }
@@ -279,8 +294,13 @@ impl Settings {
             }
         }
 
-        if let Some(x) = get_int(&matches, cfg, "retry_interval") {
-            self.retry_interval = max(x as i32, self.retry_interval);
+        if let Ok(map) = cfg.get_table("retry") {
+            if let Some(x) = get_int_from_map(&map, "count") {
+                self.retry.count = max(x as i32, self.retry.count);
+            }
+            if let Some(x) = get_int_from_map(&map, "interval") {
+                self.retry.interval = max(x as i32, self.retry.interval);
+            }
         }
 
         if let Ok(map) = cfg.get_table("log") {
@@ -388,11 +408,13 @@ dns:
 host: s.scut.edu.cn
 hostname:
 time: 7:00
-reconnect: 120
+reconnect: 60
 heartbeat:
   eap_timeout: 60
   udp_timeout: 12
-retry_interval: 5000
+retry:
+  count: 2
+  interval: 5000
 log:
   directory: ./logs
   level: INFO

@@ -1,16 +1,19 @@
 // #![allow(unused_must_use, dead_code, unused_variables, unused_imports)]
 #![feature(ip)]
 extern crate lazy_static;
-use crate::settings::Settings;
-use crate::socket::Socket;
-use crate::util::{sleep_at, ChannelData};
-use clap::clap_app;
-use log::LevelFilter::{Debug, Info};
-use log::{error, info, LevelFilter};
+
 use std::str::FromStr;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
+
+use clap::clap_app;
+use log::LevelFilter::{Debug, Info};
+use log::{error, info, LevelFilter};
+
+use crate::settings::Settings;
+use crate::socket::Socket;
+use crate::util::{sleep_at, ChannelData};
 
 mod constants;
 mod device;
@@ -137,7 +140,8 @@ fn main() {
         "Heartbeat timeout of UDP: {}s",
         settings.heartbeat.udp_timeout
     );
-    info!("Retry Interval: {}ms", settings.retry_interval);
+    info!("Retry Count: {}", settings.retry.count);
+    info!("Retry Interval: {}ms", settings.retry.interval);
     info!("Log Directory: {}", settings.log.directory);
     info!("Log Level: {}", settings.log.level);
 
@@ -146,88 +150,178 @@ fn main() {
 
     let (tx, rx) = crossbeam::unbounded::<ChannelData>();
 
+    let tx1 = tx.clone();
+    let mac = device.mac;
+    let ip = device.ip_net.ip();
     let settings1 = settings.clone();
     let device1 = device.clone();
     let eap_handle = thread::Builder::new()
-        .name("EAP-Process".to_owned())
+        .name("EAP-Process-Generator".to_owned())
         .spawn(move || {
-            let settings = settings1.clone();
-            info!("Create EAP Process.");
-            let mut eap_process = eap::Process::new(settings.clone(), device1.clone(), tx);
-            info!("Start EAP Process.");
+            let mut broke = false;
             loop {
-                if eap_process.start() {
-                    error!("Will try reconnect at the next {}.", settings.time);
-                    if sleep_at(settings.time).is_some() {
-                        continue;
+                let settings = settings1.clone();
+                let mut device = device1.clone();
+                if broke {
+                    info!("Try get the property ethernet device.");
+                    loop {
+                        match device::get_device(Some(mac), Some(ip)) {
+                            Ok(d) => {
+                                device = Arc::new(d);
+                                break;
+                            }
+                            Err(e) => {
+                                error!("Can't get ethernet device, try again in {} second(s) : {}", settings1.reconnect, e);
+                                thread::sleep(Duration::from_secs(settings1.reconnect as u64));
+                            }
+                        }
                     }
-                    error!(
-                        "Can't create a valid DateTime! Will try reconnect in {} second(s).",
-                        settings.reconnect
-                    );
-                } else {
-                    error!(
-                        "Failed at 802.1X Authorization! Will try reconnect in {} second(s).",
-                        settings.reconnect
-                    );
                 }
-                thread::sleep(Duration::from_secs(settings.reconnect as u64));
+                let tx = tx1.clone();
+                thread::Builder::new()
+                    .name("EAP-Process".to_owned())
+                    .spawn(move || {
+                        let settings = settings.clone();
+                        info!("Create EAP Process.");
+                        let mut eap_process = eap::Process::new(settings.clone(), device.clone(), tx);
+                        info!("Start EAP Process.");
+                        loop {
+                            match eap_process.start() {
+                                constants::state::SLEEP => {
+                                    error!("Will try reconnect at the next {}.", settings.time);
+                                    if sleep_at(settings.time).is_some() {
+                                        continue;
+                                    }
+                                    error!(
+                                        "Can't create a valid DateTime! Will try reconnect in {} second(s).",
+                                        settings.reconnect
+                                    );
+                                }
+                                constants::state::QUIT => {
+                                    break;
+                                }
+                                _ => {
+                                    error!(
+                                        "Failed at 802.1X Authorization! Will try reconnect in {} second(s).",
+                                        settings.reconnect
+                                    );
+                                }
+                            }
+                            thread::sleep(Duration::from_secs(settings.reconnect as u64));
+                        }
+                        info!("Quit EAP Process.");
+                    })
+                    .expect("Can't create EAP Process thread!")
+                    .join()
+                    .expect("Unexpected error at EAP Process thread!");
+
+                error!(
+                    "Fatal error at EAP Process thread! Will try restart in {} second(s).",
+                    settings1.reconnect
+                );
+                thread::sleep(Duration::from_secs(settings1.reconnect as u64));
+                broke = true;
             }
-        });
+        })
+        .expect("Can't create EAP Process generator thread!");
     if settings.no_udp {
         info!("UDP Process is disabled.")
     } else {
-        let settings2 = settings;
-        let device2 = device;
-        let udp_handle = thread::Builder::new()
-            .name("UDP-Process".to_owned())
-            .spawn(move || {
-                let settings = settings2.clone();
-                let (ip, dns) = match socket::resolve_dns(&settings) {
-                    Some(r) => r,
-                    None => {
-                        error!("UDP: Can't resolve '{}'.", &settings.host);
-                        return;
+        let tx = tx.clone();
+        loop {
+            match rx.recv() {
+                Ok(x) => match x.state {
+                    constants::state::SUCCESS => {
+                        tx.send(x).expect("Can't send initial SUCCESS!");
+                        break;
                     }
-                };
-                let socket = Socket::new(match socket::socket_bind(ip) {
-                    Some(socket) => socket,
-                    None => {
-                        error!("UDP: Can't create socket and connect to '{}'.", ip);
-                        return;
-                    }
-                });
-                info!("Create UDP Process.");
-                let mut udp_process = udp::Process::new(
-                    settings.clone(),
-                    Arc::new(socket),
-                    rx,
-                    device2.mac,
-                    device2.ip_net.ip(),
-                    dns,
-                );
-                let settings = settings;
-                info!("Start UDP Process.");
-                loop {
-                    if udp_process.start() {
-                        error!(
-                            "Will try restart UDP heartbeat at the next {}.",
-                            settings.time
-                        );
-                        if sleep_at(settings.time).is_some() {
-                            continue;
-                        }
-                        error!("Can't create a valid DateTime! Will continue UDP process.");
-                    }
+                    _ => (),
+                },
+                Err(_) => {
+                    panic!("Unexpected! EAPtoUDP channel is closed.");
                 }
-            });
+            }
+        }
+        let mac = device.mac;
+        let ip = device.ip_net.ip();
+        let udp_handle = thread::Builder::new()
+            .name("UDP-Process-Generator".to_owned())
+            .spawn(move || {
+                loop {
+                    let settings2 = settings.clone();
+                    let rx = rx.clone();
+                    thread::Builder::new()
+                        .name("UDP-Process".to_owned())
+                        .spawn(move || {
+                            let settings = settings2.clone();
+                            let (udp_ip, dns) = match socket::resolve_dns(&settings) {
+                                Some(r) => r,
+                                None => {
+                                    error!("UDP: Can't resolve '{}'.", &settings.host);
+                                    return;
+                                }
+                            };
+                            let socket = Socket::new(match socket::socket_bind(udp_ip) {
+                                Some(socket) => socket,
+                                None => {
+                                    error!("UDP: Can't create socket and connect to '{}'.", udp_ip);
+                                    return;
+                                }
+                            });
+                            info!("Create UDP Process.");
+                            let mut udp_process = udp::Process::new(
+                                settings.clone(),
+                                Arc::new(socket),
+                                rx,
+                                mac,
+                                ip,
+                                dns,
+                            );
+                            info!("Start UDP Process.");
+                            loop {
+                                match udp_process.start() {
+                                    constants::state::SLEEP => {
+                                        error!(
+                                            "Will try restart UDP heartbeat at the next {}.",
+                                            settings.time
+                                        );
+                                        if sleep_at(settings.time).is_some() {
+                                            continue;
+                                        }
+                                        error!("Can't create a valid DateTime! Will try reconnect in {} second(s).", settings.reconnect);
+                                    }
+                                    constants::state::QUIT => {
+                                        break;
+                                    }
+                                    _ => {
+                                        error!(
+                                            "Failed at UDP Process! Will try reconnect in {} second(s).",
+                                            settings.reconnect
+                                        );
+                                    }
+                                }
+                                thread::sleep(Duration::from_secs(settings.reconnect as u64));
+                            }
+                            info!("Quit UDP Process.");
+                        })
+                        .expect("Can't create UDP Process thread!")
+                        .join()
+                        .expect("Unexpected Error!");
+                    error!(
+                        "Fatal error at UDP Process thread! Will try restart in {} second(s).",
+                        settings.reconnect
+                    );
+                    thread::sleep(Duration::from_secs(settings.reconnect as u64));
+                }
+            })
+            .expect("Can't create UDP Process generator thread!");
+        // tx.send(channel_data.unwrap())
+        //     .expect("Can't send initial SUCCESS!");
         udp_handle
-            .expect("Can't create UDP Process thread!")
             .join()
-            .expect("Unexpected Error!");
+            .expect("Fatal error! UDP Process generator thread quit!");
     }
     eap_handle
-        .expect("Can't create EAP Process thread!")
         .join()
-        .expect("Unexpected Error!");
+        .expect("Fatal error! EAP Process generator thread quit!");
 }
