@@ -1,7 +1,10 @@
 use std::collections::HashMap;
 
+#[cfg(feature = "nolog")]
+use crate::{debug, error, info, log, trace, warn};
 use chrono::NaiveTime;
 use config::{Config, FileFormat, Value};
+#[cfg(not(feature = "nolog"))]
 use log::error;
 use pnet::datalink::MacAddr;
 use std::cmp::max;
@@ -12,7 +15,8 @@ use std::str::FromStr;
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
 pub struct Settings {
     pub debug: bool,
-    pub no_udp: bool,
+    pub noudp: bool,
+    pub nolog: bool,
     pub path: String,
     pub mac: Option<MacAddr>,
     pub ip: Option<IpAddr>,
@@ -25,6 +29,7 @@ pub struct Settings {
     pub reconnect: i32,
     pub heartbeat: Heartbeat,
     pub retry: Retry,
+    #[cfg(not(feature = "nolog"))]
     pub log: Log,
     pub data: Data,
 }
@@ -33,7 +38,8 @@ impl Default for Settings {
     fn default() -> Self {
         Settings {
             debug: false,
-            no_udp: false,
+            noudp: false,
+            nolog: false,
             path: String::from("config.yml"),
             mac: None,
             ip: None,
@@ -46,6 +52,7 @@ impl Default for Settings {
             reconnect: 120,
             heartbeat: Heartbeat::default(),
             retry: Retry::default(),
+            #[cfg(not(feature = "nolog"))]
             log: Log::default(),
             data: Data::default(),
         }
@@ -97,16 +104,22 @@ impl Default for Retry {
     }
 }
 
+#[cfg(not(feature = "nolog"))]
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
 pub struct Log {
-    pub directory: String,
+    pub enable_console: bool,
+    pub enable_file: bool,
+    pub file_directory: String,
     pub level: String,
 }
 
+#[cfg(not(feature = "nolog"))]
 impl Default for Log {
     fn default() -> Self {
         Log {
-            directory: String::from("./logs"),
+            enable_console: true,
+            enable_file: true,
+            file_directory: String::from("./logs"),
             level: String::from("INFO"),
         }
     }
@@ -182,6 +195,10 @@ fn get_int_from_map(map: &HashMap<String, Value>, k: &str) -> Option<i64> {
     map.get(k).and_then(|v| v.to_owned().into_int().ok())
 }
 
+fn get_bool_from_map(map: &HashMap<String, Value>, k: &str) -> Option<bool> {
+    map.get(k).and_then(|v| v.to_owned().into_bool().ok())
+}
+
 fn get_map_from_map(map: &HashMap<String, Value>, k: &str) -> Option<HashMap<String, Value>> {
     map.get(k).and_then(|v| v.to_owned().into_table().ok())
 }
@@ -209,7 +226,8 @@ impl Settings {
     pub fn new(matches: &clap::ArgMatches) -> Result<(Settings, Config), config::ConfigError> {
         let mut settings = Settings::default();
         settings.debug = matches.is_present("debug");
-        settings.no_udp = matches.is_present("noudp");
+        settings.noudp = matches.is_present("noudp");
+        settings.nolog = matches.is_present("nolog");
 
         let path = Path::new(
             matches
@@ -303,9 +321,16 @@ impl Settings {
             }
         }
 
+        #[cfg(not(feature = "nolog"))]
         if let Ok(map) = cfg.get_table("log") {
-            if let Some(x) = get_str_from_map(&map, "directory") {
-                self.log.directory = x;
+            if let Some(x) = get_bool_from_map(&map, "enable_console") {
+                self.log.enable_console = x;
+            }
+            if let Some(x) = get_bool_from_map(&map, "enable_file") {
+                self.log.enable_file = x;
+            }
+            if let Some(x) = get_str_from_map(&map, "file_directory") {
+                self.log.file_directory = x;
             }
             if let Some(x) = get_str_from_map(&map, "level") {
                 self.log.level = x;
@@ -416,7 +441,9 @@ retry:
   count: 2
   interval: 5000
 log:
-  directory: ./logs
+  enable_console: true
+  enable_file: true
+  file_directory: ./logs
   level: INFO
 data:
   response_identity:
@@ -434,3 +461,8 @@ data:
     version:
     hash:
 ";
+
+#[test]
+fn test_log() {
+    error!("error test");
+}

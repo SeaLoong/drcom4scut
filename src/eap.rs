@@ -1,7 +1,10 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+#[cfg(feature = "nolog")]
+use crate::{debug, error, info, log, trace, warn};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+#[cfg(not(feature = "nolog"))]
 use log::{debug, error, info, warn};
 use md5::Digest;
 use pnet::datalink::MacAddr;
@@ -10,7 +13,7 @@ use crate::constants;
 use crate::device::Device;
 use crate::eap::packet::*;
 use crate::settings::Settings;
-use crate::util::*;
+use crate::util::{ip_to_vec, sleep, ChannelData};
 use chrono::Local;
 use crossbeam::{Receiver, Sender, TryRecvError};
 use std::str::FromStr;
@@ -643,4 +646,9 @@ fn test_md5_calc() {
     data.put(&hex::decode("ff62b079ca26d283ca26d28300000000").unwrap()[..]);
     let r = hex::encode(md5::Md5::digest(data.bytes())).to_lowercase();
     assert_eq!(&r, "313a3758ad589ce03dc6af0371c31239");
+}
+
+#[test]
+fn test_log() {
+    debug!("debug test");
 }

@@ -6,12 +6,54 @@ use std::net::IpAddr;
 use std::ops::Add;
 use std::time::Duration;
 
-const MS: Duration = Duration::from_millis(1);
+#[cfg(feature = "nolog")]
+#[macro_export]
+macro_rules! log {
+    ($($_:tt)+) => {
+        ()
+    };
+}
+#[cfg(feature = "nolog")]
+#[macro_export]
+macro_rules! trace {
+    ($($_:tt)+) => {
+        ()
+    };
+}
+#[cfg(feature = "nolog")]
+#[macro_export]
+macro_rules! debug {
+    ($($_:tt)+) => {
+        ()
+    };
+}
+#[cfg(feature = "nolog")]
+#[macro_export]
+macro_rules! info {
+    ($($_:tt)+) => {
+        ()
+    };
+}
+#[cfg(feature = "nolog")]
+#[macro_export]
+macro_rules! warn {
+    ($($_:tt)+) => {
+        ()
+    };
+}
+#[cfg(feature = "nolog")]
+#[macro_export]
+macro_rules! error {
+    ($($_:tt)+) => {
+        ()
+    };
+}
+
+const MS: Duration = Duration::from_millis(10);
 
 #[inline]
 pub fn sleep() {
     std::thread::sleep(MS);
-    std::thread::yield_now();
 }
 
 #[inline]

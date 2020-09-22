@@ -1,8 +1,8 @@
 # drcom4scut
 
-> 当前版本  0.2.0
+> 当前版本  0.2.1
 
-+ A 3rd DrCOM client for SCUT, written by Rust.
++ A 3rd-party DrCOM client for SCUT, written in Rust.
 + 华南理工大学第三方客户端，使用Rust语言编写。
 
 ------------------------------------------------------
@@ -31,6 +31,7 @@ USAGE:
 FLAGS:
         --debug      Enable debug mode.
     -h, --help       Prints help information
+        --nolog      !!!注意：如果构建时启用了nolog特性则不会有这项!!! Disable logger, no any output at all, unless PANIC or EXCEPTION of program occurred.
         --noudp      Disable UDP Process.
     -V, --version    Prints version information
 
@@ -73,7 +74,9 @@ retry:
   count: 2   # (可选) 错误重试次数
   interval: 5000   # (可选) 数据包重发间隔、错误重试间隔
 log:
-  directory: ./logs   # (可选) 日志目录
+  enable_console: false   # (可选) 是否输出日志到控制台
+  enable_file: false   # (可选) 是否输出日志到文件
+  file_directory: ./logs   # (可选) 日志文件目录
   level: INFO   # (可选) 日志等级
 data:   # (可选) 以下参数通常不需要填写，填写错误可能会导致不可预计的问题
   response_identity:
@@ -101,6 +104,11 @@ data:   # (可选) 以下参数通常不需要填写，填写错误可能会导�
 ```bash
 cargo build --release
 ```
+
++ 如果你想去掉程序的日志(log)功能，可以启用 `nolog` 特性
+    ```bash
+    cargo build --release --features nolog
+    ```
 
 + 需要使用 *Nightly* 版本的 Rust 进行编译。
 

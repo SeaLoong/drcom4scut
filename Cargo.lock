@@ -263,7 +263,7 @@ dependencies = [
 
 [[package]]
 name = "drcom4scut"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "bytes",
  "chrono",
@@ -273,7 +273,6 @@ dependencies = [
  "encoding_rs",
  "hex",
  "hostname",
- "lazy_static",
  "log 0.4.11",
  "log4rs",
  "md-5",

@@ -1,4 +1,7 @@
 use crate::settings::Settings;
+#[cfg(feature = "nolog")]
+use crate::{debug, error, info, log, trace, warn};
+#[cfg(not(feature = "nolog"))]
 use log::{error, info};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
 use std::sync::Arc;
@@ -99,4 +102,9 @@ impl Socket {
         }
         Ok(v)
     }
+}
+
+#[test]
+fn test() {
+    error!("error test");
 }

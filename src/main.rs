@@ -1,29 +1,34 @@
-// #![allow(unused_must_use, dead_code, unused_variables, unused_imports)]
+#![allow(unused_must_use, dead_code, unused_variables, unused_imports)]
 #![feature(ip)]
-extern crate lazy_static;
-
-use std::str::FromStr;
-use std::sync::Arc;
-use std::thread;
-use std::time::Duration;
-
-use clap::clap_app;
-use log::LevelFilter::{Debug, Info};
-use log::{error, info, LevelFilter};
-
-use crate::settings::Settings;
-use crate::socket::Socket;
-use crate::util::{sleep_at, ChannelData};
-
 mod constants;
 mod device;
 mod eap;
 mod settings;
 mod socket;
 mod udp;
+#[macro_use]
 mod util;
 
-fn init_logger(settings: &Settings) -> log4rs::Handle {
+use std::str::FromStr;
+use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
+
+use crate::settings::Settings;
+use crate::socket::Socket;
+use crate::util::{sleep_at, ChannelData};
+use clap::{clap_app, ArgMatches};
+#[cfg(not(feature = "nolog"))]
+use log::{
+    debug, error, info, trace, warn, LevelFilter,
+    LevelFilter::{Debug, Info},
+};
+
+#[cfg(not(feature = "nolog"))]
+fn init_logger(settings: &Settings) {
+    if !settings.debug && settings.nolog {
+        return;
+    }
     use log4rs::{
         append::{
             console::ConsoleAppender,
@@ -38,30 +43,45 @@ fn init_logger(settings: &Settings) -> log4rs::Handle {
         config::{Appender, Config, Root},
         encode::pattern::PatternEncoder,
     };
-    let directory = &settings.log.directory;
-    let stdout = ConsoleAppender::builder()
-        .encoder(Box::new(PatternEncoder::new(
-            "{h([{d(%Y-%m-%d %H:%M:%S)}][{l}][{T}] {m}{n})}",
-        )))
-        .build();
-
-    let logfile = RollingFileAppender::builder()
-        .encoder(Box::new(PatternEncoder::new(
-            "[{d(%Y-%m-%d %H:%M:%S)}][{l}][{T}][{M}:{L}] {m}{n}",
-        )))
-        .build(
-            directory.clone() + "/latest.log",
-            Box::new(CompoundPolicy::new(
-                Box::new(SizeTrigger::new(1 << 20)),
-                Box::new(
-                    FixedWindowRoller::builder()
-                        .base(1)
-                        .build(&(directory.clone() + "/log-{}.gz"), 10)
-                        .unwrap(),
-                ),
-            )),
+    let stdout = if settings.debug || settings.log.enable_console {
+        Some(
+            ConsoleAppender::builder()
+                .encoder(Box::new(PatternEncoder::new(
+                    "{h([{d(%Y-%m-%d %H:%M:%S)}][{l}][{T}] {m}{n})}",
+                )))
+                .build(),
         )
-        .unwrap();
+    } else {
+        None
+    };
+    let logfile = if settings.log.enable_file {
+        let directory = &settings.log.file_directory;
+        Some(
+            RollingFileAppender::builder()
+                .encoder(Box::new(PatternEncoder::new(
+                    "[{d(%Y-%m-%d %H:%M:%S)}][{l}][{T}][{M}:{L}] {m}{n}",
+                )))
+                .build(
+                    directory.clone() + "/latest.log",
+                    Box::new(CompoundPolicy::new(
+                        Box::new(SizeTrigger::new(1 << 22)),
+                        Box::new(
+                            FixedWindowRoller::builder()
+                                .base(1)
+                                .build(&(directory.clone() + "/log-{}.gz"), 10)
+                                .expect("Can't build FixedWindowRoller!"),
+                        ),
+                    )),
+                )
+                .expect("Can't build RollingFileAppender!"),
+        )
+    } else {
+        None
+    };
+
+    if stdout.is_none() && logfile.is_none() {
+        return;
+    }
 
     let level = if settings.debug {
         Debug
@@ -69,22 +89,27 @@ fn init_logger(settings: &Settings) -> log4rs::Handle {
         LevelFilter::from_str(&*settings.log.level).unwrap_or(Info)
     };
 
-    let config = Config::builder()
-        .appender(Appender::builder().build("stdout", Box::new(stdout)))
-        .appender(Appender::builder().build("logfile", Box::new(logfile)))
-        .build(
-            Root::builder()
-                .appender("stdout")
-                .appender("logfile")
-                .build(level),
-        )
-        .unwrap();
+    let mut config = Config::builder();
+    let mut root = Root::builder();
+    if let Some(stdout) = stdout {
+        config = config.appender(Appender::builder().build("stdout", Box::new(stdout)));
+        root = root.appender("stdout");
+    }
+    if let Some(logfile) = logfile {
+        config = config.appender(Appender::builder().build("logfile", Box::new(logfile)));
+        root = root.appender("logfile");
+    }
 
-    log4rs::init_config(config).unwrap()
+    let config = config
+        .build(root.build(level))
+        .expect("Can't build log config!");
+
+    log4rs::init_config(config).expect("Can't init log config!");
 }
 
 #[test]
 fn test_logger() {
+    #[cfg(not(feature = "nolog"))]
     init_logger(&Settings::default());
     trace!("trace test");
     debug!("debug test");
@@ -93,11 +118,12 @@ fn test_logger() {
     error!("error test");
 }
 
-fn main() {
-    let matches = clap_app!(drcom4scut =>
-        (version: "0.1.0")
-        (author: "SeaLoong")
-        (about: "A 3rd-party Drcom client for SCUT.")
+fn get_matches<'a>() -> ArgMatches<'a> {
+    use clap::*;
+    let app = clap_app!((crate_name!()) =>
+        (version: crate_version!())
+        (author: crate_authors!())
+        (about: crate_description!())
         (@arg debug: --debug "Enable debug mode.")
         (@arg config: -c --config +takes_value "(Optional) Path to config file. Some settings only can be set by config file.")
         (@arg mac: -m --mac +takes_value "(Optional) Ethernet Device MAC address.")
@@ -109,13 +135,23 @@ fn main() {
         (@arg hostname: -N --hostname +takes_value "(Optional) Default value is current computer host name.")
         (@arg time: -t --time +takes_value "(Optional) Time to reconnect automatically after you are not allowed to access Internet. Default value is 7:00.")
         (@arg noudp: --noudp "Disable UDP Process.")
-    )
-        .get_matches();
+    );
+    #[cfg(not(feature = "nolog"))]
+    let app = app.arg(clap::Arg::with_name("nolog").long("nolog").help(
+        "Disable logger, no any output at all, unless PANIC or EXCEPTION of program occurred.",
+    ));
+    app.get_matches()
+}
+
+fn main() {
+    let matches = get_matches();
 
     let (mut settings, cfg) = settings::Settings::new(&matches).expect("Can't read config file.");
-    init_logger(&settings);
 
     settings.done(matches, cfg);
+
+    #[cfg(not(feature = "nolog"))]
+    init_logger(&settings);
 
     info!("Start to run...");
     let device =
@@ -131,7 +167,7 @@ fn main() {
     info!("Host: {}", settings.host);
     info!("Hostname: {}", settings.hostname);
     info!("Time to wake up: {}", settings.time);
-    info!("Reconnect Seconds: {}s", settings.reconnect);
+    info!("Reconnect Interval: {}s", settings.reconnect);
     info!(
         "Heartbeat timeout of EAP: {}s",
         settings.heartbeat.eap_timeout
@@ -142,7 +178,9 @@ fn main() {
     );
     info!("Retry Count: {}", settings.retry.count);
     info!("Retry Interval: {}ms", settings.retry.interval);
-    info!("Log Directory: {}", settings.log.directory);
+    info!("Log to console: {}", settings.log.enable_console);
+    info!("Log to file: {}", settings.log.enable_file);
+    info!("Log File Directory: {}", settings.log.file_directory);
     info!("Log Level: {}", settings.log.level);
 
     let settings = Arc::new(settings);
@@ -224,8 +262,8 @@ fn main() {
             }
         })
         .expect("Can't create EAP Process generator thread!");
-    if settings.no_udp {
-        info!("UDP Process is disabled.")
+    if settings.noudp {
+        info!("UDP Process is disabled.");
     } else {
         let tx = tx.clone();
         loop {
