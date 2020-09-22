@@ -9,6 +9,8 @@
 
 ## 用法
 
+> 仅供不熟悉操作的同学参考，熟悉的话直接看命令行参数和配置项应该就知道怎么用了
+
 1. 下载 Release 并解压。
 2. 运行 run.bat，第一次会产生配置文件。
    + 你也可以直接在 drcom4scut.exe 后面加参数来运行，详情请用 -h 参数获取帮助。
@@ -94,14 +96,32 @@ data:   # (可选) 以下参数通常不需要填写，填写错误可能会导�
 
 ## 构建和编译
 
+### 一般构建
+
+```bash
+cargo build --release
+```
+
 + 需要使用 *Nightly* 版本的 Rust 进行编译。
 
 + 由于使用了 [**libpnet**](https://crates.io/crates/pnet) ，在Windows下需要安装 *WinPcap* 或 *pcap* 才能进行编译，详见[**libpnet**](https://crates.io/crates/pnet)。
 
-+ 目前只在 Windows 下编译通过，其余环境暂未测试。
++ 目前在 Windows/Ubuntu(感谢hyh) 下编译通过，其余环境暂未测试。
+
+### OpenWRT
+
++ 由于并没有了解这方面，待补充。
 
 ------------------------------------------------------
 
 ## 许可证
 
 [![LGPLv3](https://img.shields.io/badge/License-LGPLv3-blue.svg?longCache=true)](https://github.com/SeaLoong/drcom4scut/blob/master/LICENSE)
+
+------------------------------------------------------
+
+## 鸣谢
+
++ hyh
++ cq
++ 所有参与使用的同学
