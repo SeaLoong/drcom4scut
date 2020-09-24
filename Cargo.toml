@@ -1,6 +1,6 @@
 [package]
 name = "drcom4scut"
-version = "0.2.2"
+version = "0.2.3"
 authors = ["SeaLoong <984391132@qq.com>"]
 edition = "2018"
 description = "A 3rd-party Drcom client for SCUT."

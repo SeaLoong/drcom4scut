@@ -263,7 +263,7 @@ dependencies = [
 
 [[package]]
 name = "drcom4scut"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "bytes",
  "chrono",

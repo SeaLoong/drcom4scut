@@ -64,7 +64,7 @@ fn init_logger(settings: &Settings) {
                 .build(
                     directory.clone() + "/latest.log",
                     Box::new(CompoundPolicy::new(
-                        Box::new(SizeTrigger::new(1 << 22)),
+                        Box::new(SizeTrigger::new(1 << 20)),
                         Box::new(
                             FixedWindowRoller::builder()
                                 .base(1)
