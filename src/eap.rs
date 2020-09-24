@@ -16,8 +16,9 @@ use crate::settings::Settings;
 use crate::util::{ip_to_vec, sleep, ChannelData};
 use chrono::Local;
 use crossbeam::{Receiver, Sender, TryRecvError};
+use std::cmp::min;
 use std::str::FromStr;
-use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU8, Ordering};
 use std::thread;
 use std::thread::JoinHandle;
 
@@ -38,7 +39,7 @@ pub struct Process {
     settings: Arc<Settings>,
     device: Arc<Device>,
     tx: Sender<ChannelData>,
-    timeout: Arc<AtomicBool>,
+    timeout: Arc<AtomicU8>,
     stop: Arc<AtomicBool>,
     quit: Arc<AtomicBool>,
     data: ProcessData,
@@ -66,7 +67,7 @@ impl Process {
                 d
             },
             tx,
-            timeout: Arc::new(AtomicBool::new(false)),
+            timeout: Arc::new(AtomicU8::new(0)),
             stop: Arc::new(AtomicBool::new(false)),
             quit: Arc::new(AtomicBool::new(false)),
             settings,
@@ -396,16 +397,16 @@ impl Process {
 
     #[inline]
     fn login_start(&mut self) {
-        self.timeout.store(false, Ordering::Release);
+        self.timeout.store(0, Ordering::Release);
         self.data.response_identity_packet = None;
         self.send_logoff();
-        thread::sleep(Duration::from_secs(3));
+        thread::sleep(Duration::from_secs(2));
         self.send_start();
     }
 
     fn on_request_identity(&mut self, eth_header: &EthernetHeader, eap_header: &EAPHeader) {
         self.cancel_resend();
-        self.timeout.store(false, Ordering::Release);
+        self.timeout.store(0, Ordering::Release);
         if let Some(ref mut v) = self.data.response_identity_packet {
             v[19] = eap_header.identifier;
             let v = v.clone();
@@ -501,8 +502,9 @@ impl Process {
         }
         let quit = self.quit.clone();
         let stop = self.stop.clone();
-        let eap_timeout = self.settings.heartbeat.eap_timeout;
         let timeout = self.timeout.clone();
+        let eap_timeout = self.settings.heartbeat.eap_timeout;
+        let count = min(self.settings.retry.count, u8::MAX as i32) as u8;
         let tx = self.tx.clone();
         self.heartbeat_handle = Some(Arc::new(
             thread::Builder::new()
@@ -517,10 +519,12 @@ impl Process {
                         if stop.load(Ordering::Relaxed) {
                             thread::park();
                         }
-                        if timeout.load(Ordering::Relaxed) {
+                        thread::sleep(duration);
+                        let cnt = timeout.load(Ordering::Relaxed);
+                        if cnt > count {
                             error!(
                                 "Heartbeat timeout! No Request, Identity packet received for {}s.",
-                                eap_timeout
+                                eap_timeout * cnt as i32
                             );
                             stop.store(true, Ordering::Release);
                             if tx
@@ -535,8 +539,7 @@ impl Process {
                                 continue;
                             }
                         }
-                        timeout.store(true, Ordering::Relaxed);
-                        std::thread::sleep(duration);
+                        timeout.store(cnt + 1, Ordering::Relaxed);
                     }
                 })
                 .expect("Can't create EAP-Heartbeat thread!"),

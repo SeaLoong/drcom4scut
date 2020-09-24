@@ -1,5 +1,5 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU8, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use std::{ptr, thread};
@@ -23,6 +23,7 @@ use crate::udp::packet::{
 };
 use crate::util::{random_vec, sleep, ChannelData};
 use crate::{constants, util};
+use std::cmp::min;
 
 mod packet;
 
@@ -42,7 +43,8 @@ pub struct Process {
     settings: Arc<Settings>,
     socket: Arc<Socket>,
     rx: Receiver<ChannelData>,
-    timeout: Arc<AtomicBool>,
+    alive: Arc<AtomicBool>,
+    timeout: Arc<AtomicU8>,
     stop: Arc<AtomicBool>,
     quit: Arc<AtomicBool>,
     sleep: Arc<AtomicBool>,
@@ -69,7 +71,8 @@ impl Process {
         dns: SocketAddr,
     ) -> Process {
         Process {
-            timeout: Arc::new(AtomicBool::new(false)),
+            alive: Arc::new(AtomicBool::new(false)),
+            timeout: Arc::new(AtomicU8::new(0)),
             stop: Arc::new(AtomicBool::new(false)),
             quit: Arc::new(AtomicBool::new(false)),
             sleep: Arc::new(AtomicBool::new(false)),
@@ -360,12 +363,13 @@ impl Process {
         while !self.stop.load(Ordering::Relaxed) {
             if self.quit.load(Ordering::Relaxed) {
                 debug!("UDP-Process thread quit!");
+                self.start_receive_eap_thread();
+                self.start_receive_thread();
+                self.start_send_thread();
+                self.start_heartbeat_thread();
                 return constants::state::QUIT;
             }
-            if self
-                .timeout
-                .compare_and_swap(true, false, Ordering::Acquire)
-            {
+            if self.alive.compare_and_swap(true, false, Ordering::Acquire) {
                 self.send_alive();
             }
             let raw = match self.receive() {
@@ -422,7 +426,7 @@ impl Process {
                         }
                         4 => {
                             info!("Receive MiscHeartbeat4.");
-                            self.timeout.store(false, Ordering::Relaxed);
+                            self.timeout.store(0, Ordering::Release);
                             info!("Heartbeat done.");
                         }
                         x => error!(
@@ -452,7 +456,8 @@ impl Process {
 
     #[inline]
     fn login_start(&mut self) {
-        self.timeout.store(false, Ordering::Release);
+        self.alive.store(false, Ordering::Release);
+        self.timeout.store(0, Ordering::Release);
         self.sleep.store(false, Ordering::Release);
         self.send_ts.store(0, Ordering::Release);
         info!("Waiting SUCCESS message from EAP.");
@@ -480,8 +485,10 @@ impl Process {
         }
         let quit = self.quit.clone();
         let stop = self.stop.clone();
+        let alive = self.alive.clone();
         let timeout = self.timeout.clone();
         let udp_timeout = self.settings.heartbeat.udp_timeout;
+        let count = min(self.settings.retry.count, u8::MAX as i32) as u8;
         self.heartbeat_handle = Some(Arc::new(thread::Builder::new().name("UDP-Heartbeat".to_owned()).spawn(move || {
             let duration = std::time::Duration::from_secs(udp_timeout as u64);
             loop {
@@ -492,11 +499,14 @@ impl Process {
                 if stop.load(Ordering::Relaxed) {
                     thread::park();
                 }
+                alive.store(true, Ordering::Release);
                 thread::sleep(duration);
-                if timeout.load(Ordering::Relaxed) {
-                    error!("Heartbeat timeout. No Misc Heartbeat packet received for {}s, but ignored.", udp_timeout);
+                let mut cnt = timeout.load(Ordering::Relaxed);
+                if cnt > count {
+                    error!("Heartbeat timeout. No Misc Heartbeat packet received for {}s, but ignored.", udp_timeout * cnt as i32);
+                    cnt = 0;
                 }
-                timeout.store(true, Ordering::Release);
+                timeout.store(cnt + 1, Ordering::Release);
             }
         }).expect("Can't create UDP-Heartbeat thread.")));
     }

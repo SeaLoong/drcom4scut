@@ -49,27 +49,12 @@ impl Default for Settings {
             host: String::from("s.scut.edu.cn"),
             hostname: String::new(),
             time: NaiveTime::from_hms(7, 0, 0),
-            reconnect: 120,
+            reconnect: 15,
             heartbeat: Heartbeat::default(),
             retry: Retry::default(),
             #[cfg(not(feature = "nolog"))]
             log: Log::default(),
             data: Data::default(),
-        }
-    }
-}
-
-#[derive(Debug, Hash, PartialEq, Eq, Clone)]
-pub struct Reconnect {
-    pub allowed_time: String,
-    pub seconds: i32,
-}
-
-impl Default for Reconnect {
-    fn default() -> Self {
-        Reconnect {
-            allowed_time: String::from("7:00"),
-            seconds: 60,
         }
     }
 }
@@ -433,7 +418,7 @@ dns:
 host: s.scut.edu.cn
 hostname:
 time: 7:00
-reconnect: 60
+reconnect: 15
 heartbeat:
   eap_timeout: 60
   udp_timeout: 12

@@ -49,11 +49,12 @@ macro_rules! error {
     };
 }
 
-const MS: Duration = Duration::from_millis(10);
+const MILLI_SEC: Duration = Duration::from_millis(10);
+const SEC: Duration = Duration::from_secs(1);
 
 #[inline]
 pub fn sleep() {
-    std::thread::sleep(MS);
+    std::thread::sleep(MILLI_SEC);
 }
 
 #[inline]
@@ -89,11 +90,12 @@ pub fn get_mac(data: &mut Bytes) -> MacAddr {
 #[inline]
 pub fn sleep_at(time: NaiveTime) -> Option<()> {
     let mut dt = Local::today().and_time(time)?;
-    if dt < Local::now() {
-        dt = dt.add(chrono::Duration::from_std(Duration::new(86400, 0)).ok()?);
+    while dt < Local::now() {
+        dt = dt + chrono::Duration::days(1);
     }
-    let duration = dt - Local::now();
-    std::thread::sleep(duration.to_std().ok()?);
+    while dt > Local::now() {
+        std::thread::sleep(SEC);
+    }
     Some(())
 }
 
