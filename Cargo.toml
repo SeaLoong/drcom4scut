@@ -27,6 +27,7 @@ crossbeam = "0.7.3"
 opt-level = 'z'
 codegen-units = 1
 lto = true
+panic = 'abort'
 
 [features]
 nolog = []
