@@ -1,6 +1,6 @@
 # drcom4scut
 
-> 当前版本  0.2.1
+> 当前版本  0.2.2
 
 + A 3rd-party DrCOM client for SCUT, written in Rust.
 + 华南理工大学第三方客户端，使用Rust语言编写。
@@ -66,7 +66,7 @@ dns:   # 学校DNS服务器IP地址，默认已填入五山校区和大学城校
 host: s.scut.edu.cn   # (可选) 用于UDP连接的地址，通常不需要改动
 hostname:   # (可选) 主机名，留空会使用当前电脑的主机名
 time: 7:00   # (可选) 在收到“本时段禁止上网”后的重连时间，默认为7点整
-reconnect: 60   # (可选) 出现意外情况时的重连间隔，默认为60秒
+reconnect: 15   # (可选) 出现意外情况时的重连间隔，默认为15秒
 heartbeat:
   eap_timeout: 60   # (可选) EAP连接心跳间隔，默认为60秒
   udp_timeout: 12   # (可选) UDP连接心跳间隔，默认为12秒
