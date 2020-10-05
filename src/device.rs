@@ -25,11 +25,8 @@ fn filter_interface<P: FnMut(&NetworkInterface) -> bool>(f: P) -> Option<Network
 
 fn get_first_valid_ip(e: &NetworkInterface) -> Option<&IpNetwork> {
     for ip_net in &e.ips {
-        if ip_net.prefix() != 0 {
-            let ip = ip_net.ip();
-            if ip.is_global() {
-                return Some(ip_net);
-            }
+        if ip_net.prefix() != 0 && ip_net.ip().is_global() {
+            return Some(ip_net);
         }
     }
     None
