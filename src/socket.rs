@@ -95,11 +95,7 @@ impl Socket {
     pub fn receive(&self) -> io::Result<Vec<u8>> {
         let mut buffer = [0u8; 2048];
         let size = self.socket.recv(&mut buffer)?;
-        let mut v = Vec::with_capacity(size);
-        unsafe {
-            ptr::copy(buffer.as_ptr(), v.as_mut_ptr(), size);
-            v.set_len(size);
-        }
+        let v = buffer[..size].to_vec();
         Ok(v)
     }
 }
