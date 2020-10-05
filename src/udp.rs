@@ -545,8 +545,9 @@ impl Process {
                 })
                 .append_to(data);
                 info!("calculate crc and apply to md5.");
-                unsafe {
-                    ptr::copy(crc.to_le_bytes().as_ptr(), dt.crc_md5.as_mut_ptr(), 4);
+                let crc_array = crc.to_le_bytes();
+                for i in 0..crc_array.len() {
+                    dt.crc_md5[i] = crc_array[i];
                 }
                 break;
             }
