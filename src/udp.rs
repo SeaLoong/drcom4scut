@@ -546,9 +546,7 @@ impl Process {
                 .append_to(data);
                 info!("calculate crc and apply to md5.");
                 let crc_array = crc.to_le_bytes();
-                for i in 0..crc_array.len() {
-                    dt.crc_md5[i] = crc_array[i];
-                }
+                dt.crc_md5[..crc_array.len()].copy_from_slice(&crc_array);
                 break;
             }
             sleep();
