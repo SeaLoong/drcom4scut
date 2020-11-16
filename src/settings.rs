@@ -26,7 +26,7 @@ pub struct Settings {
     pub host: String,
     pub hostname: String,
     pub time: NaiveTime,
-    pub reconnect: i32,
+    pub reconnect: u64,
     pub heartbeat: Heartbeat,
     pub retry: Retry,
     #[cfg(not(feature = "nolog"))]
@@ -200,11 +200,11 @@ fn get_str(matches: &clap::ArgMatches, cfg: &config::Config, k: &str) -> Option<
     }
 }
 
-fn get_int(matches: &clap::ArgMatches, cfg: &config::Config, k: &str) -> Option<i64> {
+fn get_u64(matches: &clap::ArgMatches, cfg: &config::Config, k: &str) -> Option<u64> {
     matches
         .value_of(k)
-        .and_then(|s| i64::from_str(s).ok())
-        .or_else(|| cfg.get_int(k).ok())
+        .and_then(|s| u64::from_str(s).ok())
+        .or_else(|| cfg.get_int(k).ok().and_then(|x| Some(x as u64)))
 }
 
 impl Settings {
@@ -284,8 +284,8 @@ impl Settings {
                 .expect("Can't parse time String to NativeTime.");
         }
 
-        if let Some(x) = get_int(&matches, cfg, "reconnect") {
-            self.reconnect = x as i32;
+        if let Some(x) = get_u64(&matches, cfg, "reconnect") {
+            self.reconnect = x;
         }
 
         if let Ok(map) = cfg.get_table("heartbeat") {
