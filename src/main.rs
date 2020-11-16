@@ -210,7 +210,7 @@ fn main() {
                             }
                             Err(e) => {
                                 error!("Can't get ethernet device, try again in {} second(s) : {}", settings1.reconnect, e);
-                                thread::sleep(Duration::from_secs(settings1.reconnect as u64));
+                                thread::sleep(Duration::from_secs(settings1.reconnect));
                             }
                         }
                     }
@@ -245,7 +245,7 @@ fn main() {
                                     );
                                 }
                             }
-                            thread::sleep(Duration::from_secs(settings.reconnect as u64));
+                            thread::sleep(Duration::from_secs(settings.reconnect));
                         }
                         info!("Quit EAP Process.");
                     })
@@ -257,7 +257,7 @@ fn main() {
                     "Fatal error at EAP Process thread! Will try restart in {} second(s).",
                     settings1.reconnect
                 );
-                thread::sleep(Duration::from_secs(settings1.reconnect as u64));
+                thread::sleep(Duration::from_secs(settings1.reconnect));
                 broke = true;
             }
         })
@@ -338,7 +338,7 @@ fn main() {
                                         );
                                     }
                                 }
-                                thread::sleep(Duration::from_secs(settings.reconnect as u64));
+                                thread::sleep(Duration::from_secs(settings.reconnect));
                             }
                             info!("Quit UDP Process.");
                         })
@@ -349,7 +349,7 @@ fn main() {
                         "Fatal error at UDP Process thread! Will try restart in {} second(s).",
                         settings.reconnect
                     );
-                    thread::sleep(Duration::from_secs(settings.reconnect as u64));
+                    thread::sleep(Duration::from_secs(settings.reconnect));
                 }
             })
             .expect("Can't create UDP Process generator thread!");
