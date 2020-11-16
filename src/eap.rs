@@ -9,11 +9,10 @@ use log::{debug, error, info, warn};
 use md5::Digest;
 use pnet::datalink::MacAddr;
 
-use crate::constants;
 use crate::device::Device;
 use crate::eap::packet::*;
 use crate::settings::Settings;
-use crate::util::{ip_to_vec, sleep, ChannelData};
+use crate::util::{ip_to_vec, sleep, ChannelData, State};
 use chrono::Local;
 use crossbeam::{Receiver, Sender, TryRecvError};
 use std::cmp::min;
@@ -281,7 +280,7 @@ impl Process {
         self.cancel_resend.store(true, Ordering::Release);
     }
 
-    pub fn start(&mut self) -> u8 {
+    pub fn start(&mut self) -> State {
         self.stop.store(false, Ordering::Release);
         self.start_receive_thread();
         self.start_send_thread();
@@ -291,12 +290,12 @@ impl Process {
             if self.quit.load(Ordering::Relaxed) {
                 debug!("EAP-Process thread quit!");
                 if let Err(e) = self.tx.try_send(ChannelData {
-                    state: constants::state::QUIT,
+                    state: State::Quit,
                     data: Vec::new(),
                 }) {
                     error!("Can't send STOP message to UDP receiver. {}", e);
                 }
-                return constants::state::QUIT;
+                return State::Quit;
             }
             let raw = match self.receive() {
                 Some(v) => v,
@@ -346,7 +345,7 @@ impl Process {
                                     ret = self.on_request_notification(&eap_header, bytes); // sleep if true
                                     if ret {
                                         if let Err(e) = self.tx.try_send(ChannelData {
-                                            state: constants::state::SLEEP,
+                                            state: State::Sleep,
                                             data: Vec::new(),
                                         }) {
                                             error!(
@@ -389,9 +388,9 @@ impl Process {
             }
         }
         if ret {
-            constants::state::SLEEP
+            State::Sleep
         } else {
-            constants::state::STOP
+            State::Stop
         }
     }
 
@@ -487,7 +486,7 @@ impl Process {
         info!("802.1X Authorization success!");
         // notify UDP process should start
         if let Err(e) = self.tx.try_send(ChannelData {
-            state: constants::state::SUCCESS,
+            state: State::Suceess,
             data: self.data.md5.clone(),
         }) {
             error!("Can't send SUCCESS message to UDP receiver. {}", e);
@@ -529,7 +528,7 @@ impl Process {
                             stop.store(true, Ordering::Release);
                             if tx
                                 .send(ChannelData {
-                                    state: constants::state::STOP,
+                                    state: State::Stop,
                                     data: Vec::new(),
                                 })
                                 .is_err()

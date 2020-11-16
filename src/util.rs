@@ -108,8 +108,19 @@ pub fn random_vec(n: usize) -> Vec<u8> {
     v
 }
 
-#[derive(Debug, Default, PartialEq, Eq, Hash, Clone)]
+/// enum of ChannelData.state
+///
+/// # State
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+pub enum State {
+    Suceess,
+    Stop,
+    Sleep,
+    Quit,
+}
+
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct ChannelData {
-    pub state: u8,
+    pub state: State,
     pub data: Vec<u8>,
 }

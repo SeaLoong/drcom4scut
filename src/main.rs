@@ -1,6 +1,5 @@
 #![allow(unused_must_use, dead_code, unused_variables, unused_imports)]
 #![feature(ip)]
-mod constants;
 mod device;
 mod eap;
 mod settings;
@@ -16,7 +15,7 @@ use std::time::Duration;
 
 use crate::settings::Settings;
 use crate::socket::Socket;
-use crate::util::{sleep_at, ChannelData};
+use crate::util::{sleep_at, ChannelData, State};
 use clap::{clap_app, ArgMatches};
 #[cfg(not(feature = "nolog"))]
 use log::{
@@ -225,7 +224,7 @@ fn main() {
                         info!("Start EAP Process.");
                         loop {
                             match eap_process.start() {
-                                constants::state::SLEEP => {
+                                State::Sleep => {
                                     error!("Will try reconnect at the next {}.", settings.time);
                                     if sleep_at(settings.time).is_some() {
                                         continue;
@@ -235,7 +234,7 @@ fn main() {
                                         settings.reconnect
                                     );
                                 }
-                                constants::state::QUIT => {
+                                State::Quit => {
                                     break;
                                 }
                                 _ => {
@@ -269,7 +268,7 @@ fn main() {
         loop {
             match rx.recv() {
                 Ok(x) => match x.state {
-                    constants::state::SUCCESS => {
+                    State::Suceess => {
                         tx.send(x).expect("Can't send initial SUCCESS!");
                         break;
                     }
@@ -318,7 +317,7 @@ fn main() {
                             info!("Start UDP Process.");
                             loop {
                                 match udp_process.start() {
-                                    constants::state::SLEEP => {
+                                    State::Sleep => {
                                         error!(
                                             "Will try restart UDP heartbeat at the next {}.",
                                             settings.time
@@ -328,7 +327,7 @@ fn main() {
                                         }
                                         error!("Can't create a valid DateTime! Will try reconnect in {} second(s).", settings.reconnect);
                                     }
-                                    constants::state::QUIT => {
+                                    State::Quit => {
                                         break;
                                     }
                                     _ => {
