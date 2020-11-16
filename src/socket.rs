@@ -4,12 +4,11 @@ use crate::{debug, error, info, log, trace, warn};
 #[cfg(not(feature = "nolog"))]
 use log::{error, info};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
-use std::sync::Arc;
 use std::{io, ptr};
 use trust_dns_resolver::config::{NameServerConfig, Protocol, ResolverConfig, ResolverOpts};
 use trust_dns_resolver::Resolver;
 
-pub fn resolve_dns(settings: &Arc<Settings>) -> Option<(IpAddr, SocketAddr)> {
+pub fn resolve_dns(settings: &Settings) -> Option<(IpAddr, SocketAddr)> {
     info!("DNS resolving...");
     let mut r: Option<(IpAddr, SocketAddr)> = None;
     for address in &settings.dns {
