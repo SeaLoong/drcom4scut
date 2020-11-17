@@ -5,7 +5,6 @@ mod eap;
 mod settings;
 mod socket;
 mod udp;
-#[macro_use]
 mod util;
 
 use std::str::FromStr;
