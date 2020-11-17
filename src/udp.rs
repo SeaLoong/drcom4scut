@@ -21,8 +21,8 @@ use crate::udp::packet::{
     decrypt_info, Alive, HeaderType, HeartbeatType, MiscAlive, MiscHeartbeat1, MiscHeartbeat3,
     MiscInfo,
 };
-use crate::util::{random_vec, sleep, ChannelData};
-use crate::{constants, util};
+use crate::util::{random_vec, sleep, ChannelData,State};
+use crate::util;
 use std::cmp::min;
 
 mod packet;
@@ -312,7 +312,7 @@ impl Process {
                     }
                     match rx.recv() {
                         Ok(x) => match x.state {
-                            constants::state::SUCCESS => {
+                            State::Suceess => {
                                 info!("Receive SUCCESS from EAP.");
                                 loop {
                                     if let Ok(mut r) = data.try_write() {
@@ -324,20 +324,19 @@ impl Process {
                                 }
                                 thread.unpark();
                             }
-                            constants::state::STOP => {
+                            State::Stop => {
                                 info!("Receive STOP from EAP.");
                                 stop.store(true, Ordering::Release);
                             }
-                            constants::state::SLEEP => {
+                            State::Sleep => {
                                 info!("Receive SLEEP from EAP.");
                                 sleep.store(true, Ordering::Release);
                                 stop.store(true, Ordering::Release);
                             }
-                            constants::state::QUIT => {
+                            State::Quit => {
                                 info!("Receive QUIT from EAP.");
                                 quit.store(true, Ordering::Release);
                             }
-                            _ => (),
                         },
                         Err(_) => {
                             error!("Unexpected! EAPtoUDP channel is closed.");
@@ -353,7 +352,7 @@ impl Process {
         self.cancel_resend.store(true, Ordering::Release);
     }
 
-    pub fn start(&mut self) -> u8 {
+    pub fn start(&mut self) -> State {
         self.thread = Arc::new(thread::current());
         self.stop.store(false, Ordering::Release);
         self.start_receive_eap_thread();
@@ -367,7 +366,7 @@ impl Process {
                 self.start_receive_thread();
                 self.start_send_thread();
                 self.start_heartbeat_thread();
-                return constants::state::QUIT;
+                return State::Quit;
             }
             if self.alive.compare_and_swap(true, false, Ordering::Acquire) {
                 self.send_alive();
@@ -448,9 +447,9 @@ impl Process {
             }
         }
         if self.sleep.load(Ordering::Relaxed) {
-            constants::state::SLEEP
+            State::Sleep
         } else {
-            constants::state::STOP
+            State::Stop
         }
     }
 
