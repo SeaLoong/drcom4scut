@@ -1,6 +1,6 @@
 [package]
 name = "drcom4scut"
-version = "0.2.3"
+version = "0.2.4"
 authors = ["SeaLoong <984391132@qq.com>"]
 edition = "2018"
 description = "A 3rd-party Drcom client for SCUT."
@@ -10,7 +10,7 @@ description = "A 3rd-party Drcom client for SCUT."
 [dependencies]
 rand = "0.7.3"
 log = "0.4.11"
-log4rs = "1.0.0-alpha-2"
+log4rs = { version = "1.0.0-alpha-2", features = ["gzip"] }
 chrono = "0.4"
 clap = "2"
 config = "0.10"
