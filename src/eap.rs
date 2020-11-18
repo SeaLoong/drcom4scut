@@ -14,7 +14,7 @@ use crate::eap::packet::*;
 use crate::settings::Settings;
 use crate::util::{ip_to_vec, sleep, ChannelData, State};
 use chrono::Local;
-use crossbeam::{Receiver, Sender, TryRecvError};
+use crossbeam::channel::{Receiver, Sender, TryRecvError};
 use std::cmp::min;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU8, Ordering};
@@ -86,7 +86,7 @@ impl<'a> Process<'a> {
             handle.thread().unpark();
             return;
         }
-        let (tx, rx) = crossbeam::unbounded::<Vec<u8>>();
+        let (tx, rx) = crossbeam::channel::unbounded::<Vec<u8>>();
         self.receive_channel = Some(rx);
         let quit = self.quit.clone();
         let stop = self.stop.clone();
@@ -139,7 +139,7 @@ impl<'a> Process<'a> {
             }
             return;
         }
-        let (tx, rx) = crossbeam::unbounded::<(Vec<u8>, bool)>();
+        let (tx, rx) = crossbeam::channel::unbounded::<(Vec<u8>, bool)>();
         self.send_channel = Some(tx.clone());
         let quit = self.quit.clone();
         let stop = self.stop.clone();

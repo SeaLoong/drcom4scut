@@ -3,8 +3,8 @@ use crate::settings::Settings;
 use crate::{debug, error, info, log, trace, warn};
 #[cfg(not(feature = "nolog"))]
 use log::{error, info};
+use std::io;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
-use std::{io, ptr};
 use trust_dns_resolver::config::{NameServerConfig, Protocol, ResolverConfig, ResolverOpts};
 use trust_dns_resolver::Resolver;
 
@@ -37,7 +37,7 @@ pub fn resolve_dns(settings: &Settings) -> Option<(IpAddr, SocketAddr)> {
             if r.is_some() {
                 break;
             }
-            r = Some((ip, address.clone()));
+            r = Some((ip, *address));
         }
         if r.is_some() {
             break;

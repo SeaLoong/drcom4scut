@@ -3,7 +3,6 @@ use chrono::{Local, NaiveTime};
 use pnet::datalink::MacAddr;
 use rand::random;
 use std::net::IpAddr;
-use std::ops::Add;
 use std::time::Duration;
 
 #[cfg(feature = "nolog")]

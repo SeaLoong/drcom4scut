@@ -144,7 +144,6 @@ fn get_matches<'a>() -> ArgMatches<'a> {
 }
 
 fn main() {
-    //generate static settlings
     let settings = {
         lazy_static! {
             static ref SETTINGS: settings::Settings = {
@@ -193,7 +192,7 @@ fn main() {
 
     let device = Arc::new(device);
 
-    let (tx, rx) = crossbeam::unbounded::<ChannelData>();
+    let (tx, rx) = crossbeam::channel::unbounded::<ChannelData>();
 
     let tx1 = tx.clone();
     let mac = device.mac;
@@ -269,16 +268,14 @@ fn main() {
     if settings.noudp {
         info!("UDP Process is disabled.");
     } else {
-        let tx = tx.clone();
         loop {
             match rx.recv() {
-                Ok(x) => match x.state {
-                    State::Suceess => {
+                Ok(x) => {
+                    if let State::Suceess = x.state {
                         tx.send(x).expect("Can't send initial SUCCESS!");
                         break;
                     }
-                    _ => (),
-                },
+                }
                 Err(_) => {
                     panic!("Unexpected! EAPtoUDP channel is closed.");
                 }

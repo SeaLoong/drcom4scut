@@ -1,16 +1,15 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU8, Ordering};
 use std::sync::{Arc, RwLock};
+use std::thread::{self, JoinHandle, Thread};
 use std::time::Duration;
-use std::{ptr, thread};
-use thread::{JoinHandle, Thread};
 
 #[cfg(feature = "nolog")]
 use crate::{debug, error, info, log, trace, warn};
 use bytes::BytesMut;
 use chrono::Local;
 use crossbeam::channel::TryRecvError;
-use crossbeam::{Receiver, Sender};
+use crossbeam::channel::{Receiver, Sender};
 #[cfg(not(feature = "nolog"))]
 use log::{debug, error, info};
 use pnet::datalink::MacAddr;
@@ -21,7 +20,7 @@ use crate::udp::packet::{
     decrypt_info, Alive, HeaderType, HeartbeatType, MiscAlive, MiscHeartbeat1, MiscHeartbeat3,
     MiscInfo,
 };
-use crate::util::{self,random_vec, sleep, ChannelData, State};
+use crate::util::{self, random_vec, sleep, ChannelData, State};
 use std::cmp::min;
 
 mod packet;
@@ -100,7 +99,7 @@ impl<'a> Process<'a> {
             handle.thread().unpark();
             return;
         }
-        let (tx, rx) = crossbeam::unbounded::<Vec<u8>>();
+        let (tx, rx) = crossbeam::channel::unbounded::<Vec<u8>>();
         self.receive_channel = Some(rx);
         let quit = self.quit.clone();
         let stop = self.stop.clone();
@@ -153,7 +152,7 @@ impl<'a> Process<'a> {
             }
             return;
         }
-        let (tx, rx) = crossbeam::unbounded::<(Vec<u8>, bool)>();
+        let (tx, rx) = crossbeam::channel::unbounded::<(Vec<u8>, bool)>();
         self.send_channel = Some(tx.clone());
         let quit = self.quit.clone();
         let stop = self.stop.clone();
