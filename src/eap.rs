@@ -18,8 +18,7 @@ use crossbeam::{Receiver, Sender, TryRecvError};
 use std::cmp::min;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU8, Ordering};
-use std::thread;
-use std::thread::JoinHandle;
+use std::thread::{self, JoinHandle};
 
 mod packet;
 
@@ -33,9 +32,9 @@ struct ProcessData {
     response_identity_packet: Option<Vec<u8>>,
 }
 
-pub struct Process {
+pub struct Process<'a> {
     eth_header: EthernetHeader,
-    settings: Arc<Settings>,
+    settings: &'a Settings,
     device: Arc<Device>,
     tx: Sender<ChannelData>,
     timeout: Arc<AtomicU8>,
@@ -52,8 +51,8 @@ pub struct Process {
     heartbeat_handle: Option<Arc<JoinHandle<()>>>,
 }
 
-impl Process {
-    pub fn new(settings: Arc<Settings>, device: Arc<Device>, tx: Sender<ChannelData>) -> Process {
+impl<'a> Process<'a> {
+    pub fn new(settings: &Settings, device: Arc<Device>, tx: Sender<ChannelData>) -> Process {
         Process {
             eth_header: EthernetHeader {
                 destination: MULTICAST_MAC,

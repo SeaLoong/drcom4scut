@@ -295,6 +295,7 @@ dependencies = [
  "encoding_rs",
  "hex",
  "hostname",
+ "lazy_static",
  "log 0.4.11",
  "log4rs",
  "md-5",

@@ -11,6 +11,8 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
+#[macro_use]
+extern crate lazy_static;
 
 use crate::settings::Settings;
 use crate::socket::Socket;
@@ -142,14 +144,22 @@ fn get_matches<'a>() -> ArgMatches<'a> {
 }
 
 fn main() {
-    let matches = get_matches();
-
-    let (mut settings, cfg) = settings::Settings::new(&matches).expect("Can't read config file.");
-
-    settings.done(matches, cfg);
+    //generate static settlings
+    let settings = {
+        lazy_static! {
+            static ref SETTINGS: settings::Settings = {
+                let matches = get_matches();
+                let (mut set, cfg) =
+                    settings::Settings::new(&matches).expect("Can't read config file.");
+                set.done(matches, cfg);
+                set
+            };
+        }
+        &(*SETTINGS)
+    };
 
     #[cfg(not(feature = "nolog"))]
-    init_logger(&settings);
+    init_logger(settings);
 
     info!("Start to run...");
     let device =
@@ -181,7 +191,6 @@ fn main() {
     info!("Log File Directory: {}", settings.log.file_directory);
     info!("Log Level: {}", settings.log.level);
 
-    let settings = Arc::new(settings);
     let device = Arc::new(device);
 
     let (tx, rx) = crossbeam::unbounded::<ChannelData>();
@@ -189,14 +198,12 @@ fn main() {
     let tx1 = tx.clone();
     let mac = device.mac;
     let ip = device.ip_net.ip();
-    let settings1 = settings.clone();
     let device1 = device.clone();
     let eap_handle = thread::Builder::new()
         .name("EAP-Process-Generator".to_owned())
         .spawn(move || {
             let mut broke = false;
             loop {
-                let settings = settings1.clone();
                 let mut device = device1.clone();
                 if broke {
                     info!("Try get the property ethernet device.");
@@ -207,8 +214,8 @@ fn main() {
                                 break;
                             }
                             Err(e) => {
-                                error!("Can't get ethernet device, try again in {} second(s) : {}", settings1.reconnect, e);
-                                thread::sleep(Duration::from_secs(settings1.reconnect));
+                                error!("Can't get ethernet device, try again in {} second(s) : {}", settings.reconnect, e);
+                                thread::sleep(Duration::from_secs(settings.reconnect));
                             }
                         }
                     }
@@ -217,9 +224,8 @@ fn main() {
                 thread::Builder::new()
                     .name("EAP-Process".to_owned())
                     .spawn(move || {
-                        let settings = settings.clone();
                         info!("Create EAP Process.");
-                        let mut eap_process = eap::Process::new(settings.clone(), device.clone(), tx);
+                        let mut eap_process = eap::Process::new(settings, device.clone(), tx);
                         info!("Start EAP Process.");
                         loop {
                             match eap_process.start() {
@@ -253,9 +259,9 @@ fn main() {
 
                 error!(
                     "Fatal error at EAP Process thread! Will try restart in {} second(s).",
-                    settings1.reconnect
+                    settings.reconnect
                 );
-                thread::sleep(Duration::from_secs(settings1.reconnect));
+                thread::sleep(Duration::from_secs(settings.reconnect));
                 broke = true;
             }
         })
@@ -284,16 +290,14 @@ fn main() {
             .name("UDP-Process-Generator".to_owned())
             .spawn(move || {
                 loop {
-                    let settings2 = settings.clone();
                     let rx = rx.clone();
                     thread::Builder::new()
                         .name("UDP-Process".to_owned())
                         .spawn(move || {
-                            let settings = settings2.clone();
-                            let (udp_ip, dns) = match socket::resolve_dns(&settings) {
+                            let (udp_ip, dns) = match socket::resolve_dns(settings) {
                                 Some(r) => r,
                                 None => {
-                                    error!("UDP: Can't resolve '{}'.", &settings.host);
+                                    error!("UDP: Can't resolve '{}'.", settings.host);
                                     return;
                                 }
                             };
@@ -306,7 +310,7 @@ fn main() {
                             });
                             info!("Create UDP Process.");
                             let mut udp_process = udp::Process::new(
-                                settings.clone(),
+                                settings,
                                 Arc::new(socket),
                                 rx,
                                 mac,
@@ -351,8 +355,6 @@ fn main() {
                 }
             })
             .expect("Can't create UDP Process generator thread!");
-        // tx.send(channel_data.unwrap())
-        //     .expect("Can't send initial SUCCESS!");
         udp_handle
             .join()
             .expect("Fatal error! UDP Process generator thread quit!");
