@@ -6,3 +6,6 @@
 /target
 /logs
 config.yml
+
+#project
+Packet.lib

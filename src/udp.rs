@@ -21,8 +21,7 @@ use crate::udp::packet::{
     decrypt_info, Alive, HeaderType, HeartbeatType, MiscAlive, MiscHeartbeat1, MiscHeartbeat3,
     MiscInfo,
 };
-use crate::util::{random_vec, sleep, ChannelData,State};
-use crate::util;
+use crate::util::{self,random_vec, sleep, ChannelData, State};
 use std::cmp::min;
 
 mod packet;
@@ -36,11 +35,11 @@ struct ProcessData {
     decrypted_from_misc_response_info: Vec<u8>,
 }
 
-pub struct Process {
+pub struct Process<'a> {
     mac: MacAddr,
     ip: IpAddr,
     dns: SocketAddr,
-    settings: Arc<Settings>,
+    settings: &'a Settings,
     socket: Arc<Socket>,
     rx: Receiver<ChannelData>,
     alive: Arc<AtomicBool>,
@@ -61,15 +60,15 @@ pub struct Process {
     thread: Arc<Thread>,
 }
 
-impl Process {
+impl<'a> Process<'a> {
     pub fn new(
-        settings: Arc<Settings>,
+        settings: &'a Settings,
         socket: Arc<Socket>,
         rx: Receiver<ChannelData>,
         mac: MacAddr,
         ip: IpAddr,
         dns: SocketAddr,
-    ) -> Process {
+    ) -> Process<'a> {
         Process {
             alive: Arc::new(AtomicBool::new(false)),
             timeout: Arc::new(AtomicU8::new(0)),
