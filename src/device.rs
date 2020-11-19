@@ -15,7 +15,6 @@ pub struct Device {
     receiver: RefCell<Box<dyn DataLinkReceiver>>,
 }
 
-unsafe impl Send for Device {}
 unsafe impl Sync for Device {}
 
 #[inline]
