@@ -85,7 +85,7 @@ data:   # (可选) 以下参数通常不需要填写，填写错误可能会导�
     unknown:
   misc_info:
     unknown1:
-    crc32_param:
+    cks32_param:
     unknown2:
     os_major:
     os_minor:

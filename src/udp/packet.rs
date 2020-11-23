@@ -61,7 +61,7 @@ impl MiscAlive {
     }
 }
 
-fn append_checksum32(v: &mut Vec<u8>) -> u32 {
+fn append_cks32(v: &mut Vec<u8>) -> u32 {
     let len = (v[2] >> 2) as usize;
     v[28] = 126;
     let acc = (0..len).map(|x| x << 2).fold([0u8; 4], |mut acc, i| {
@@ -83,7 +83,7 @@ pub struct MiscInfo {
     pub ip: IpAddr,
     pub unknown1: Vec<u8>,
     pub flux: Vec<u8>,
-    pub crc32_param: Vec<u8>,
+    pub cks32_param: Vec<u8>,
     pub username: String,
     pub hostname: String,
     pub dns1: IpAddr,
@@ -113,8 +113,8 @@ impl MiscInfo {
 
         data.put(&self.flux[..]); // +4
 
-        // crc32
-        data.put(&self.crc32_param[..]); // +4
+        // cks32
+        data.put(&self.cks32_param[..]); // +4
 
         data.put(&[0u8].repeat(4)[..]); // +4
 
@@ -155,7 +155,7 @@ impl MiscInfo {
         }
 
         let v = &mut data.to_vec();
-        let r = append_checksum32(v);
+        let r = append_cks32(v);
         bytes.put(&v[..]);
         r
     }
@@ -177,7 +177,7 @@ impl MiscHeartbeat1 {
     }
 }
 
-fn append_checksum16(v: &mut Vec<u8>) -> u32 {
+fn append_cks16(v: &mut Vec<u8>) -> u32 {
     let acc = (0..20).map(|x| x << 1).fold([0u8; 2], |mut acc, i| {
         acc[0] ^= v[i];
         acc[1] ^= v[i + 1];
@@ -205,14 +205,14 @@ impl MiscHeartbeat3 {
         data.put(&self.flux[..]); // +4
         data.put(&[0u8].repeat(4)[..]); // +4
 
-        // checksum
+        // cks16
         data.put(&[0u8].repeat(4)[..]); // +4
 
         data.put(&ip_to_vec(&self.ip)[..]); // +4
         data.put(&[0u8].repeat(8)[..]); // +8
 
         let v = &mut data.to_vec();
-        let r = append_checksum16(v);
+        let r = append_cks16(v);
         bytes.put(&v[..]);
         r
     }
@@ -226,14 +226,14 @@ pub fn decrypt_info(v: &mut Vec<u8>) {
 }
 
 pub struct Alive {
-    pub crc_md5: Vec<u8>,
+    pub cks_md5: Vec<u8>,
     pub decrypted_from_misc_response_info: Vec<u8>,
 }
 
 impl Alive {
     pub fn append_to(&self, data: &mut BytesMut) {
         data.put_u8(0xff); // +1
-        data.put(&self.crc_md5[..]); // +16
+        data.put(&self.cks_md5[..]); // +16
         data.put(&[0u8].repeat(3)[..]); // +3
         data.put(&self.decrypted_from_misc_response_info[..]); // +16
         data.put_u16_le(chrono::Local::now().timestamp() as u16); // +2
@@ -243,18 +243,18 @@ impl Alive {
 #[test]
 fn test() {
     let mut v = hex::decode("0701f400030cb025aa286db97dd9fee10222002a3bab4e04c72f3101000000003230313833363433313135345365614c6f6f6e67000000000000000000000000000000000000000000000000ca26c12100000000ca7011210000000000000000940000000600000002000000f0230000020000004472434f4d0096022a0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000034656238316663303438613535383562376466653137383331353532343161333238623130336336000000000000000000000000000000000000000000000000").unwrap();
-    append_checksum32(&mut v);
+    append_cks32(&mut v);
     assert_eq!(hex::encode(v), "0701f400030cb025aa286db97dd9fee10222002a3bab4e044af8a726000000003230313833363433313135345365614c6f6f6e67000000000000000000000000000000000000000000000000ca26c12100000000ca7011210000000000000000940000000600000002000000f0230000020000004472434f4d0096022a0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000034656238316663303438613535383562376466653137383331353532343161333238623130336336000000000000000000000000000000000000000000000000");
 
     let mut v = hex::decode("0701f400030cb025aa286db97dd9fee10222002a53513f04c72f3101000000003230313833363433313135345365614c6f6f6e67000000000000000000000000000000000000000000000000ca26c12100000000ca7011210000000000000000940000000600000002000000f0230000020000004472434f4d0096022a0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000034656238316663303438613535383562376466653137383331353532343161333238623130336336000000000000000000000000000000000000000000000000").unwrap();
-    append_checksum32(&mut v);
+    append_cks32(&mut v);
     assert_eq!(hex::encode(v), "0701f400030cb025aa286db97dd9fee10222002a53513f049adf0351000000003230313833363433313135345365614c6f6f6e67000000000000000000000000000000000000000000000000ca26c12100000000ca7011210000000000000000940000000600000002000000f0230000020000004472434f4d0096022a0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000034656238316663303438613535383562376466653137383331353532343161333238623130336336000000000000000000000000000000000000000000000000");
 
     let mut v = hex::decode(
         "075628000b03dc02b91900000000000067513f0400000000000000007dd9fee10000000000000000",
     )
     .unwrap();
-    append_checksum16(&mut v);
+    append_cks16(&mut v);
     assert_eq!(
         hex::encode(v),
         "075628000b03dc02b91900000000000067513f0400000000b6e062007dd9fee10000000000000000"

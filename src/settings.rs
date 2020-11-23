@@ -146,7 +146,7 @@ impl Default for ResponseMD5Challenge {
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
 pub struct MiscInfo {
     pub unknown1: Vec<u8>,
-    pub crc32_param: Vec<u8>,
+    pub cks32_param: Vec<u8>,
     pub unknown2: Vec<u8>,
     pub os_major: Vec<u8>,
     pub os_minor: Vec<u8>,
@@ -160,7 +160,7 @@ impl Default for MiscInfo {
     fn default() -> Self {
         MiscInfo {
             unknown1: hex::decode("0222002a").unwrap(),
-            crc32_param: hex::decode("c72f3101").unwrap(),
+            cks32_param: hex::decode("c72f3101").unwrap(),
             unknown2: hex::decode("94000000").unwrap(),
             os_major: hex::decode("06000000").unwrap(),
             os_minor: hex::decode("02000000").unwrap(),
@@ -349,11 +349,11 @@ impl Settings {
                         error!("Invalid config: data.misc_info.unknown1! Default value instead.")
                     }
                 }
-                if let Some(s) = get_str_from_map(&map, "crc32_param") {
+                if let Some(s) = get_str_from_map(&map, "cks32_param") {
                     if let Ok(v) = hex::decode(s) {
-                        self.data.misc_info.crc32_param = v;
+                        self.data.misc_info.cks32_param = v;
                     } else {
-                        error!("Invalid config: data.misc_info.crc32_param! Default value instead.")
+                        error!("Invalid config: data.misc_info.cks32_param! Default value instead.")
                     }
                 }
                 if let Some(s) = get_str_from_map(&map, "unknown2") {
@@ -437,7 +437,7 @@ data:
     unknown:
   misc_info:
     unknown1:
-    crc32_param:
+    cks32_param:
     unknown2:
     os_major:
     os_minor:
