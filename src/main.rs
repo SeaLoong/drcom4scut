@@ -143,17 +143,15 @@ fn get_matches<'a>() -> ArgMatches<'a> {
     app.get_matches()
 }
 
+static SETTINGS: SyncLazy<Settings> = SyncLazy::new(|| {
+    let matches = get_matches();
+    let (mut set, cfg) = settings::Settings::new(&matches).expect("Can't read config file.");
+    set.done(matches, cfg);
+    set
+});
+
 fn main() {
-    let settings = SyncLazy::force({
-        static SETTINGS: SyncLazy<Settings> = SyncLazy::new(|| {
-            let matches = get_matches();
-            let (mut set, cfg) =
-                settings::Settings::new(&matches).expect("Can't read config file.");
-            set.done(matches, cfg);
-            set
-        });
-        &SETTINGS
-    });
+    let settings = &SETTINGS;
 
     #[cfg(not(feature = "nolog"))]
     init_logger(settings);
