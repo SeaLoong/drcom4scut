@@ -1,5 +1,6 @@
 #![allow(unused_must_use, dead_code, unused_variables, unused_imports)]
 #![feature(ip)]
+#![feature(once_cell)]
 mod device;
 mod eap;
 mod settings;
@@ -7,12 +8,11 @@ mod socket;
 mod udp;
 mod util;
 
+use std::lazy::SyncLazy;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
-#[macro_use]
-extern crate lazy_static;
 
 use crate::settings::Settings;
 use crate::socket::Socket;
@@ -144,18 +144,16 @@ fn get_matches<'a>() -> ArgMatches<'a> {
 }
 
 fn main() {
-    let settings = {
-        lazy_static! {
-            static ref SETTINGS: settings::Settings = {
-                let matches = get_matches();
-                let (mut set, cfg) =
-                    settings::Settings::new(&matches).expect("Can't read config file.");
-                set.done(matches, cfg);
-                set
-            };
-        }
-        &(*SETTINGS)
-    };
+    let settings = SyncLazy::force({
+        static SETTINGS: SyncLazy<Settings> = SyncLazy::new(|| {
+            let matches = get_matches();
+            let (mut set, cfg) =
+                settings::Settings::new(&matches).expect("Can't read config file.");
+            set.done(matches, cfg);
+            set
+        });
+        &SETTINGS
+    });
 
     #[cfg(not(feature = "nolog"))]
     init_logger(settings);
