@@ -29,7 +29,7 @@ mod packet;
 struct ProcessData {
     counter: u8,
     rnd: Vec<u8>,
-    crc_md5: Vec<u8>,
+    cks_md5: Vec<u8>,
     flux: Vec<u8>,
     decrypted_from_misc_response_info: Vec<u8>,
 }
@@ -314,8 +314,8 @@ impl<'a> Process<'a> {
                                 info!("Receive SUCCESS from EAP.");
                                 loop {
                                     if let Ok(mut r) = data.try_write() {
-                                        r.crc_md5 = x.data;
-                                        info!("crc_md5(md5): {}", hex::encode(&r.crc_md5));
+                                        r.cks_md5 = x.data;
+                                        info!("cks_md5(md5): {}", hex::encode(&r.cks_md5));
                                         break;
                                     }
                                     util::sleep();
@@ -522,12 +522,12 @@ impl<'a> Process<'a> {
         let fixed = &settings.data.misc_info;
         loop {
             if let Ok(mut dt) = self.data.try_write() {
-                let crc = (MiscInfo {
+                let cks = (MiscInfo {
                     mac: self.mac,
                     ip: self.ip,
                     unknown1: fixed.unknown1.clone(),
                     flux: dt.flux.clone(),
-                    crc32_param: fixed.crc32_param.clone(),
+                    cks32_param: fixed.cks32_param.clone(),
                     username: settings.username.clone(),
                     hostname: settings.hostname.clone(),
                     dns1: self.dns.ip(),
@@ -541,9 +541,9 @@ impl<'a> Process<'a> {
                     hash: fixed.hash.clone(),
                 })
                 .append_to(data);
-                info!("calculate crc and apply to md5.");
-                let crc_array = crc.to_le_bytes();
-                dt.crc_md5[..crc_array.len()].copy_from_slice(&crc_array);
+                info!("calculate cks and apply to md5.");
+                let cks_array = cks.to_le_bytes();
+                dt.cks_md5[..cks_array.len()].copy_from_slice(&cks_array);
                 break;
             }
             sleep();
@@ -597,7 +597,7 @@ impl<'a> Process<'a> {
         loop {
             if let Ok(dt) = self.data.try_read() {
                 Alive {
-                    crc_md5: dt.crc_md5.clone(),
+                    cks_md5: dt.cks_md5.clone(),
                     decrypted_from_misc_response_info: dt.decrypted_from_misc_response_info.clone(),
                 }
                 .append_to(data);

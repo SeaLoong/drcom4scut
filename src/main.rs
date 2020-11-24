@@ -1,5 +1,6 @@
 #![allow(unused_must_use, dead_code, unused_variables, unused_imports)]
 #![feature(ip)]
+#![feature(once_cell)]
 mod device;
 mod eap;
 mod settings;
@@ -7,12 +8,11 @@ mod socket;
 mod udp;
 mod util;
 
+use std::lazy::SyncLazy;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
-#[macro_use]
-extern crate lazy_static;
 
 use crate::settings::Settings;
 use crate::socket::Socket;
@@ -143,19 +143,15 @@ fn get_matches<'a>() -> ArgMatches<'a> {
     app.get_matches()
 }
 
+static SETTINGS: SyncLazy<Settings> = SyncLazy::new(|| {
+    let matches = get_matches();
+    let (mut set, cfg) = settings::Settings::new(&matches).expect("Can't read config file.");
+    set.done(matches, cfg);
+    set
+});
+
 fn main() {
-    let settings = {
-        lazy_static! {
-            static ref SETTINGS: settings::Settings = {
-                let matches = get_matches();
-                let (mut set, cfg) =
-                    settings::Settings::new(&matches).expect("Can't read config file.");
-                set.done(matches, cfg);
-                set
-            };
-        }
-        &(*SETTINGS)
-    };
+    let settings = &SETTINGS;
 
     #[cfg(not(feature = "nolog"))]
     init_logger(settings);
@@ -190,20 +186,19 @@ fn main() {
     info!("Log File Directory: {}", settings.log.file_directory);
     info!("Log Level: {}", settings.log.level);
 
-    let device = Arc::new(device);
-
-    let (tx, rx) = crossbeam::channel::unbounded::<ChannelData>();
-
-    let tx1 = tx.clone();
     let mac = device.mac;
     let ip = device.ip_net.ip();
-    let device1 = device.clone();
+
+    let (tx, rx) = crossbeam::channel::unbounded::<ChannelData>();
+    let tx1 = tx.clone();
+
     let eap_handle = thread::Builder::new()
         .name("EAP-Process-Generator".to_owned())
         .spawn(move || {
+            let device = Arc::new(device);
             let mut broke = false;
             loop {
-                let mut device = device1.clone();
+                let mut device = device.clone();
                 if broke {
                     info!("Try get the property ethernet device.");
                     loop {
@@ -224,7 +219,7 @@ fn main() {
                     .name("EAP-Process".to_owned())
                     .spawn(move || {
                         info!("Create EAP Process.");
-                        let mut eap_process = eap::Process::new(settings, device.clone(), tx);
+                        let mut eap_process = eap::Process::new(settings, device, tx);
                         info!("Start EAP Process.");
                         loop {
                             match eap_process.start() {
@@ -281,8 +276,7 @@ fn main() {
                 }
             }
         }
-        let mac = device.mac;
-        let ip = device.ip_net.ip();
+
         let udp_handle = thread::Builder::new()
             .name("UDP-Process-Generator".to_owned())
             .spawn(move || {
