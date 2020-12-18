@@ -270,14 +270,12 @@ impl Settings {
             self.host = s;
         }
 
-        if let Some(s) = get_str(&matches, cfg, "hostname") {
-            self.hostname = s;
-        } else {
-            self.hostname = hostname::get()
+        self.hostname = get_str(&matches, cfg, "hostname").unwrap_or(
+            hostname::get()
                 .expect("Can't get current computer host name.")
                 .into_string()
-                .expect("Can't parse host name to String.");
-        }
+                .expect("Can't parse host name to String."),
+        );
 
         if let Some(s) = get_str(&matches, cfg, "time") {
             self.time = NaiveTime::parse_from_str(&s, "%H:%M")

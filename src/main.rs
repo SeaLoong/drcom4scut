@@ -264,16 +264,10 @@ fn main() {
         info!("UDP Process is disabled.");
     } else {
         loop {
-            match rx.recv() {
-                Ok(x) => {
-                    if let State::Suceess = x.state {
-                        tx.send(x).expect("Can't send initial SUCCESS!");
-                        break;
-                    }
-                }
-                Err(_) => {
-                    panic!("Unexpected! EAPtoUDP channel is closed.");
-                }
+            let rx_recv = rx.recv().expect("Unexpected! EAPtoUDP channel is closed.");
+            if State::Suceess == rx_recv.state {
+                tx.send(rx_recv).expect("Can't send initial SUCCESS!");
+                break;
             }
         }
 
