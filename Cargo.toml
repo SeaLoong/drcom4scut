@@ -10,7 +10,7 @@ description = "A 3rd-party Drcom client for SCUT."
 [dependencies]
 rand = "0.7"
 log = "0.4"
-log4rs = { version = "0", features = ["gzip"] }
+log4rs = { version = "1", features = ["gzip"] }
 chrono = "0.4"
 clap = "2"
 config = "0.10"
