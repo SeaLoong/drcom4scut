@@ -1,12 +1,15 @@
-use crate::settings::Settings;
-#[cfg(feature = "nolog")]
-use crate::{debug, error, info, log, trace, warn};
-#[cfg(not(feature = "nolog"))]
-use log::{error, info};
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
+
 use trust_dns_resolver::config::{NameServerConfig, Protocol, ResolverConfig, ResolverOpts};
 use trust_dns_resolver::Resolver;
+
+use crate::settings::Settings;
+
+#[cfg(not(feature = "enablelog"))]
+use crate::{error, info};
+#[cfg(feature = "enablelog")]
+use log::{error, info};
 
 pub fn resolve_dns(settings: &Settings) -> Option<(IpAddr, SocketAddr)> {
     info!("DNS resolving...");

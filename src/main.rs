@@ -1,6 +1,5 @@
 #![allow(unused_must_use, dead_code, unused_variables, unused_imports)]
-#![feature(ip)]
-#![feature(once_cell)]
+#![feature(ip,once_cell)]
 mod device;
 mod eap;
 mod settings;
@@ -14,17 +13,19 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
+use clap::{clap_app, ArgMatches};
+
 use crate::settings::Settings;
 use crate::socket::Socket;
 use crate::util::{sleep_at, ChannelData, State};
-use clap::{clap_app, ArgMatches};
-#[cfg(not(feature = "nolog"))]
+
+#[cfg(feature = "enablelog")]
 use log::{
     debug, error, info, trace, warn, LevelFilter,
     LevelFilter::{Debug, Info},
 };
 
-#[cfg(not(feature = "nolog"))]
+#[cfg(feature = "enablelog")]
 fn init_logger(settings: &Settings) {
     if !settings.debug && settings.nolog {
         return;
@@ -109,7 +110,7 @@ fn init_logger(settings: &Settings) {
 
 #[test]
 fn test_logger() {
-    #[cfg(not(feature = "nolog"))]
+    #[cfg(feature = "enablelog")]
     init_logger(&Settings::default());
     trace!("trace test");
     debug!("debug test");
@@ -136,10 +137,11 @@ fn get_matches<'a>() -> ArgMatches<'a> {
         (@arg time: -t --time +takes_value "(Optional) Time to reconnect automatically after you are not allowed to access Internet. Default value is 7:00.")
         (@arg noudp: --noudp "Disable UDP Process.")
     );
-    #[cfg(not(feature = "nolog"))]
+    #[cfg(feature = "enablelog")]
     let app = app.arg(clap::Arg::with_name("nolog").long("nolog").help(
         "Disable logger, no any output at all, unless PANIC or EXCEPTION of program occurred.",
     ));
+
     app.get_matches()
 }
 
@@ -153,7 +155,7 @@ static SETTINGS: SyncLazy<Settings> = SyncLazy::new(|| {
 fn main() {
     let settings = &SETTINGS;
 
-    #[cfg(not(feature = "nolog"))]
+    #[cfg(feature = "enablelog")]
     init_logger(settings);
 
     info!("Start to run...");
