@@ -1,16 +1,17 @@
-use std::collections::HashMap;
-
-#[cfg(feature = "nolog")]
-use crate::{debug, error, info, log, trace, warn};
-use chrono::NaiveTime;
-use config::{Config, FileFormat, Value};
-#[cfg(not(feature = "nolog"))]
-use log::error;
-use pnet::datalink::MacAddr;
 use std::cmp::max;
+use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::path::Path;
 use std::str::FromStr;
+
+use chrono::NaiveTime;
+use config::{Config, FileFormat, Value};
+use pnet::datalink::MacAddr;
+
+#[cfg(not(feature = "enablelog"))]
+use crate::error;
+#[cfg(feature = "enablelog")]
+use log::error;
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
 pub struct Settings {
@@ -29,9 +30,10 @@ pub struct Settings {
     pub reconnect: u64,
     pub heartbeat: Heartbeat,
     pub retry: Retry,
-    #[cfg(not(feature = "nolog"))]
-    pub log: Log,
     pub data: Data,
+
+    #[cfg(feature = "enablelog")]
+    pub log: Log,
 }
 
 impl Default for Settings {
@@ -52,9 +54,10 @@ impl Default for Settings {
             reconnect: 15,
             heartbeat: Heartbeat::default(),
             retry: Retry::default(),
-            #[cfg(not(feature = "nolog"))]
-            log: Log::default(),
             data: Data::default(),
+
+            #[cfg(feature = "enablelog")]
+            log: Log::default(),
         }
     }
 }
@@ -89,7 +92,7 @@ impl Default for Retry {
     }
 }
 
-#[cfg(not(feature = "nolog"))]
+#[cfg(feature = "enablelog")]
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
 pub struct Log {
     pub enable_console: bool,
@@ -98,7 +101,7 @@ pub struct Log {
     pub level: String,
 }
 
-#[cfg(not(feature = "nolog"))]
+#[cfg(feature = "enablelog")]
 impl Default for Log {
     fn default() -> Self {
         Log {
@@ -304,7 +307,7 @@ impl Settings {
             }
         }
 
-        #[cfg(not(feature = "nolog"))]
+        #[cfg(feature = "enablelog")]
         if let Ok(map) = cfg.get_table("log") {
             if let Some(x) = get_bool_from_map(&map, "enable_console") {
                 self.log.enable_console = x;

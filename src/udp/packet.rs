@@ -4,7 +4,6 @@ use crate::util::{ip_to_vec, put_mac};
 use bytes::{BufMut, BytesMut};
 use pnet::datalink::MacAddr;
 use std::cmp::min;
-use std::ptr;
 
 pub enum HeaderType {
     MiscAlive,

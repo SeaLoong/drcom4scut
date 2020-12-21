@@ -1,17 +1,14 @@
+use std::cmp::min;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU8, Ordering};
 use std::sync::{Arc, RwLock};
 use std::thread::{self, JoinHandle, Thread};
 use std::time::Duration;
 
-#[cfg(feature = "nolog")]
-use crate::{debug, error, info, log, trace, warn};
 use bytes::BytesMut;
 use chrono::Local;
 use crossbeam::channel::TryRecvError;
 use crossbeam::channel::{Receiver, Sender};
-#[cfg(not(feature = "nolog"))]
-use log::{debug, error, info};
 use pnet::datalink::MacAddr;
 
 use crate::settings::Settings;
@@ -21,7 +18,11 @@ use crate::udp::packet::{
     MiscInfo,
 };
 use crate::util::{self, random_vec, sleep, ChannelData, State};
-use std::cmp::min;
+
+#[cfg(not(feature = "enablelog"))]
+use crate::{debug, error, info};
+#[cfg(feature = "enablelog")]
+use log::{debug, error, info};
 
 mod packet;
 

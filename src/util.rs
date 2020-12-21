@@ -1,52 +1,10 @@
+use std::net::IpAddr;
+use std::time::Duration;
+
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use chrono::{Local, NaiveTime};
 use pnet::datalink::MacAddr;
 use rand::random;
-use std::net::IpAddr;
-use std::time::Duration;
-
-#[cfg(feature = "nolog")]
-#[macro_export]
-macro_rules! log {
-    ($($_:tt)+) => {
-        ()
-    };
-}
-#[cfg(feature = "nolog")]
-#[macro_export]
-macro_rules! trace {
-    ($($_:tt)+) => {
-        ()
-    };
-}
-#[cfg(feature = "nolog")]
-#[macro_export]
-macro_rules! debug {
-    ($($_:tt)+) => {
-        ()
-    };
-}
-#[cfg(feature = "nolog")]
-#[macro_export]
-macro_rules! info {
-    ($($_:tt)+) => {
-        ()
-    };
-}
-#[cfg(feature = "nolog")]
-#[macro_export]
-macro_rules! warn {
-    ($($_:tt)+) => {
-        ()
-    };
-}
-#[cfg(feature = "nolog")]
-#[macro_export]
-macro_rules! error {
-    ($($_:tt)+) => {
-        ()
-    };
-}
 
 const MILLI_SEC: Duration = Duration::from_millis(10);
 const SEC: Duration = Duration::from_secs(1);

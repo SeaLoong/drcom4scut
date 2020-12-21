@@ -1,11 +1,13 @@
+use std::cmp::min;
+use std::str::FromStr;
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU8, Ordering};
 use std::sync::Arc;
+use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-#[cfg(feature = "nolog")]
-use crate::{debug, error, info, log, trace, warn};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-#[cfg(not(feature = "nolog"))]
-use log::{debug, error, info, warn};
+use chrono::Local;
+use crossbeam::channel::{Receiver, Sender, TryRecvError};
 use md5::Digest;
 use pnet::datalink::MacAddr;
 
@@ -13,12 +15,11 @@ use crate::device::Device;
 use crate::eap::packet::*;
 use crate::settings::Settings;
 use crate::util::{ip_to_vec, sleep, ChannelData, State};
-use chrono::Local;
-use crossbeam::channel::{Receiver, Sender, TryRecvError};
-use std::cmp::min;
-use std::str::FromStr;
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU8, Ordering};
-use std::thread::{self, JoinHandle};
+
+#[cfg(not(feature = "enablelog"))]
+use crate::{debug, error, info, warn};
+#[cfg(feature = "enablelog")]
+use log::{debug, error, info, warn};
 
 mod packet;
 
