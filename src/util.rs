@@ -6,49 +6,6 @@ use chrono::{Local, NaiveTime};
 use pnet::datalink::MacAddr;
 use rand::random;
 
-#[cfg(not(feature = "enablelog"))]
-#[macro_export]
-macro_rules! log {
-    ($($_:tt)+) => {
-        ()
-    };
-}
-#[cfg(not(feature = "enablelog"))]
-#[macro_export]
-macro_rules! trace {
-    ($($_:tt)+) => {
-        ()
-    };
-}
-#[cfg(not(feature = "enablelog"))]
-#[macro_export]
-macro_rules! debug {
-    ($($_:tt)+) => {
-        ()
-    };
-}
-#[cfg(not(feature = "enablelog"))]
-#[macro_export]
-macro_rules! info {
-    ($($_:tt)+) => {
-        ()
-    };
-}
-#[cfg(not(feature = "enablelog"))]
-#[macro_export]
-macro_rules! warn {
-    ($($_:tt)+) => {
-        ()
-    };
-}
-#[cfg(not(feature = "enablelog"))]
-#[macro_export]
-macro_rules! error {
-    ($($_:tt)+) => {
-        ()
-    };
-}
-
 const MILLI_SEC: Duration = Duration::from_millis(10);
 const SEC: Duration = Duration::from_secs(1);
 
