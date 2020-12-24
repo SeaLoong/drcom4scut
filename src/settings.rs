@@ -407,7 +407,8 @@ impl Settings {
     }
 }
 
-const DEFAULT_CONFIG_FILE: &str = "mac:
+const DEFAULT_CONFIG_FILE: &str = "\
+mac:
 ip:
 username:
 password:
