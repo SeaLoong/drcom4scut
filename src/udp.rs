@@ -311,7 +311,7 @@ impl<'a> Process<'a> {
                     }
                     match rx.recv() {
                         Ok(x) => match x.state {
-                            State::Suceess => {
+                            State::Success => {
                                 info!("Receive SUCCESS from EAP.");
                                 loop {
                                     if let Ok(mut r) = data.try_write() {

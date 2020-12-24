@@ -272,7 +272,7 @@ fn main() {
     } else {
         loop {
             let rx_recv = rx.recv().expect("Unexpected! EAPtoUDP channel is closed.");
-            if State::Suceess == rx_recv.state {
+            if State::Success == rx_recv.state {
                 tx.send(rx_recv).expect("Can't send initial SUCCESS!");
                 break;
             }

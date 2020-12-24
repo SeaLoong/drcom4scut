@@ -486,7 +486,7 @@ impl<'a> Process<'a> {
         info!("802.1X Authorization success!");
         // notify UDP process should start
         if let Err(e) = self.tx.try_send(ChannelData {
-            state: State::Suceess,
+            state: State::Success,
             data: self.data.md5.clone(),
         }) {
             error!("Can't send SUCCESS message to UDP receiver. {}", e);

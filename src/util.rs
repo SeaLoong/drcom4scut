@@ -70,7 +70,7 @@ pub fn random_vec(n: usize) -> Vec<u8> {
 /// # State
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub enum State {
-    Suceess,
+    Success,
     Stop,
     Sleep,
     Quit,

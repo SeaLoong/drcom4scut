@@ -31,7 +31,7 @@ USAGE:
 FLAGS:
         --debug      Enable debug mode.
     -h, --help       Prints help information
-        --nolog      !!!注意：如果构建时启用了nolog特性则不会有这项!!! Disable logger, no any output at all, unless PANIC or EXCEPTION of program occurred.
+        --nolog      Disable logger, no any output at all, unless PANIC or EXCEPTION of program occurred.
         --noudp      Disable UDP Process.
     -V, --version    Prints version information
 
