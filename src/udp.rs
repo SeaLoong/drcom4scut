@@ -367,7 +367,11 @@ impl<'a> Process<'a> {
                 self.start_heartbeat_thread();
                 return State::Quit;
             }
-            if self.alive.compare_and_swap(true, false, Ordering::Acquire) {
+            if self
+                .alive
+                .compare_exchange(true, false, Ordering::Acquire, Ordering::Acquire)
+                == Ok(true)
+            {
                 self.send_alive();
             }
             let raw = match self.receive() {

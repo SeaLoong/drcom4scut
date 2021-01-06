@@ -600,17 +600,14 @@ impl<'a> Process<'a> {
         self.data.md5_extra_data = bytes
             .split_to((eap_header.length as usize) - md5_size - 6)
             .to_vec();
-        let md5 = &md5::Md5::digest(
-            &{
-                let mut not_encrypt =
-                    BytesMut::with_capacity(1 + self.settings.password.len() + md5_value.len());
-                not_encrypt.put_u8(eap_header.identifier);
-                not_encrypt.put(self.settings.password.as_bytes());
-                not_encrypt.put(&md5_value[..]);
-                not_encrypt
-            }
-            .bytes(),
-        )[..];
+        let md5 = &md5::Md5::digest(&{
+            let mut not_encrypt =
+                BytesMut::with_capacity(1 + self.settings.password.len() + md5_value.len());
+            not_encrypt.put_u8(eap_header.identifier);
+            not_encrypt.put(self.settings.password.as_bytes());
+            not_encrypt.put(&md5_value[..]);
+            not_encrypt
+        })[..];
         self.data.md5 = md5.to_vec();
         let payload = &mut BytesMut::with_capacity(96);
         payload.put_u8(md5.len() as u8);
@@ -646,7 +643,7 @@ fn test_md5_calc() {
     data.put_u8(0);
     data.put("qwert12345".as_bytes());
     data.put(&hex::decode("ff62b079ca26d283ca26d28300000000").unwrap()[..]);
-    let r = hex::encode(md5::Md5::digest(data.bytes())).to_lowercase();
+    let r = hex::encode(md5::Md5::digest(&data)).to_lowercase();
     assert_eq!(&r, "313a3758ad589ce03dc6af0371c31239");
 }
 
