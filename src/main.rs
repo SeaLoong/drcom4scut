@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use clap::{clap_app, ArgMatches};
+use clap::{clap_app, crate_authors, crate_description, crate_name, crate_version, ArgMatches};
 
 use crate::settings::Settings;
 use crate::socket::Socket;
@@ -22,7 +22,7 @@ use crate::util::{sleep_at, ChannelData, State};
 #[cfg(feature = "enablelog")]
 use log::LevelFilter::{self, Debug, Info};
 #[cfg(feature = "enablelog")]
-use log::{error, info};
+use log::{debug, error, info, trace, warn};
 
 #[cfg(feature = "enablelog")]
 fn init_logger(settings: &Settings) {
@@ -109,8 +109,6 @@ fn init_logger(settings: &Settings) {
 
 #[test]
 fn test_logger() {
-    #[cfg(feature = "enablelog")]
-    use log::{debug, error, info, trace, warn};
     #[cfg(feature = "enablelog")]
     init_logger(&Settings::default());
     trace!("trace test");
