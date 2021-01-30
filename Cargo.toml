@@ -6,23 +6,34 @@ edition = "2018"
 description = "A 3rd-party Drcom client for SCUT."
 
 [dependencies]
-clap = "2"
-rand = "0.8"
-chrono = "0.4"
-config = "0.10"
 bytes = "1"
-hex = "0.4"
-pnet = "0.27"
-md-5 = "0.9"
-trust-dns-resolver = "0.20"
-hostname = "0.3"
-encoding_rs = "0.8"
+chrono = "0.4"
+clap = "2"
 crossbeam = "0.8"
-log = { version = "0.4", optional = true }
-log4rs = { version = "1", features = ["gzip"], optional = true }
+encoding_rs = "0.8"
+hex = "0.4"
+hostname = "0.3"
+md-5 = "0.9"
+pnet = "0.27"
+rand = "0.8"
+trust-dns-resolver = "0.20"
+
+[dependencies.config]
+version = "0.10"
+default-features = false
+features = ["yaml"]
+
+[dependencies.log]
+version = "0.4"
+optional = true
+
+[dependencies.log4rs]
+version = "1"
+features = ["gzip"]
+optional = true
 
 [profile.release]
-opt-level = 'z'
+opt-level = "z"
 codegen-units = 1
 lto = true
 panic = 'abort'
