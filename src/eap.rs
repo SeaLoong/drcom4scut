@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use chrono::Local;
-use crossbeam::channel::{Receiver, Sender, TryRecvError};
+use crossbeam_channel::{unbounded, Receiver, Sender, TryRecvError};
 use md5::Digest;
 use pnet::datalink::MacAddr;
 
@@ -87,7 +87,7 @@ impl<'a> Process<'a> {
             handle.thread().unpark();
             return;
         }
-        let (tx, rx) = crossbeam::channel::unbounded::<Vec<u8>>();
+        let (tx, rx) = unbounded::<Vec<u8>>();
         self.receive_channel = Some(rx);
         let quit = self.quit.clone();
         let stop = self.stop.clone();
@@ -140,7 +140,7 @@ impl<'a> Process<'a> {
             }
             return;
         }
-        let (tx, rx) = crossbeam::channel::unbounded::<(Vec<u8>, bool)>();
+        let (tx, rx) = unbounded::<(Vec<u8>, bool)>();
         self.send_channel = Some(tx.clone());
         let quit = self.quit.clone();
         let stop = self.stop.clone();

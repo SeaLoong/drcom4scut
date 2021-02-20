@@ -194,7 +194,7 @@ fn main() {
     let mac = device.mac;
     let ip = device.ip_net.ip();
 
-    let (tx, rx) = crossbeam::channel::unbounded::<ChannelData>();
+    let (tx, rx) = crossbeam_channel::unbounded::<ChannelData>();
     let tx1 = tx.clone();
 
     let eap_handle = thread::Builder::new()
