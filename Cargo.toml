@@ -4,6 +4,8 @@ version = "0.2.7"
 authors = ["SeaLoong <984391132@qq.com>"]
 edition = "2018"
 description = "A 3rd-party Drcom client for SCUT."
+license = "GPL-3.0-or-later"
+readme = "README.md"
 
 [dependencies]
 bytes = "1"
