@@ -60,10 +60,9 @@ impl<'a> Process<'a> {
                 source: device.mac,
                 ethernet_type: ethernet_types::IEEE8021X,
             },
-            data: {
-                let mut d = ProcessData::default();
-                d.ip = ip_to_vec(&device.ip_net.ip());
-                d
+            data: ProcessData {
+                ip: ip_to_vec(&device.ip_net.ip()),
+                ..Default::default()
             },
             tx,
             timeout: Arc::new(AtomicU8::new(0)),

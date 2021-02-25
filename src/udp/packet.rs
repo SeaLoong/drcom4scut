@@ -218,9 +218,9 @@ impl MiscHeartbeat3 {
 }
 
 pub fn decrypt_info(v: &mut Vec<u8>) {
-    for i in 0..v.len() {
+    for (i, val) in v.iter_mut().enumerate() {
         let x = i & 0x07;
-        v[i] = (((v[i] as u16) << x) + ((v[i] as u16) >> (8 - x))) as u8;
+        *val = (((*val as u16) << x) + ((*val as u16) >> (8 - x))) as u8;
     }
 }
 

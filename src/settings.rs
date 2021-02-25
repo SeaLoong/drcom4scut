@@ -39,25 +39,11 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Settings {
-            debug: false,
-            noudp: false,
-            nolog: false,
             path: String::from("config.yml"),
-            mac: None,
-            ip: None,
-            username: String::new(),
-            password: String::new(),
-            dns: Vec::new(),
             host: String::from("s.scut.edu.cn"),
-            hostname: String::new(),
             time: NaiveTime::from_hms(7, 0, 0),
             reconnect: 15,
-            heartbeat: Heartbeat::default(),
-            retry: Retry::default(),
-            data: Data::default(),
-
-            #[cfg(feature = "enablelog")]
-            log: Log::default(),
+            ..Default::default()
         }
     }
 }
@@ -212,10 +198,12 @@ fn get_u64(matches: &clap::ArgMatches, cfg: &config::Config, k: &str) -> Option<
 
 impl Settings {
     pub fn new(matches: &clap::ArgMatches) -> Result<(Settings, Config), config::ConfigError> {
-        let mut settings = Settings::default();
-        settings.debug = matches.is_present("debug");
-        settings.noudp = matches.is_present("noudp");
-        settings.nolog = matches.is_present("nolog");
+        let settings = Settings {
+            debug: matches.is_present("debug"),
+            noudp: matches.is_present("noudp"),
+            nolog: matches.is_present("nolog"),
+            ..Default::default()
+        };
 
         let path = Path::new(
             matches
@@ -273,12 +261,12 @@ impl Settings {
             self.host = s;
         }
 
-        self.hostname = get_str(&matches, cfg, "hostname").unwrap_or(
+        self.hostname = get_str(&matches, cfg, "hostname").unwrap_or_else(|| {
             hostname::get()
                 .expect("Can't get current computer host name.")
                 .into_string()
-                .expect("Can't parse host name to String."),
-        );
+                .expect("Can't parse host name to String.")
+        });
 
         if let Some(s) = get_str(&matches, cfg, "time") {
             self.time = NaiveTime::parse_from_str(&s, "%H:%M")
