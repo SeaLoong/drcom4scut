@@ -146,8 +146,9 @@ fn get_matches<'a>() -> ArgMatches<'a> {
 
 static SETTINGS: SyncLazy<Settings> = SyncLazy::new(|| {
     let matches = get_matches();
-    let (mut set, cfg) = settings::Settings::new(&matches).expect("Can't read config file.");
-    set.done(matches, cfg);
+    let mut set = settings::Settings::new(&matches);
+    let cfg = set.read_config().expect("Can't read config file.");
+    set.done(&matches, &cfg);
     set
 });
 

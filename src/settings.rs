@@ -102,7 +102,7 @@ impl Default for Log {
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Default)]
 pub struct Data {
     pub response_identity: ResponseIdentity,
-    pub response_md5_challenge: ResponseMD5Challenge,
+    pub response_md5_challenge: ResponseMd5Challenge,
     pub misc_info: MiscInfo,
 }
 
@@ -120,13 +120,13 @@ impl Default for ResponseIdentity {
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
-pub struct ResponseMD5Challenge {
+pub struct ResponseMd5Challenge {
     pub unknown: Vec<u8>,
 }
 
-impl Default for ResponseMD5Challenge {
+impl Default for ResponseMd5Challenge {
     fn default() -> Self {
-        ResponseMD5Challenge {
+        ResponseMd5Challenge {
             unknown: hex::decode("0044612a00").unwrap(),
         }
     }
@@ -197,34 +197,29 @@ fn get_u64(matches: &clap::ArgMatches, cfg: &config::Config, k: &str) -> Option<
 }
 
 impl Settings {
-    pub fn new(matches: &clap::ArgMatches) -> Result<(Settings, Config), config::ConfigError> {
-        let settings = Settings {
+    pub fn new(matches: &clap::ArgMatches) -> Settings {
+        Settings {
             debug: matches.is_present("debug"),
             noudp: matches.is_present("noudp"),
             nolog: matches.is_present("nolog"),
+            path: matches.value_of("config").unwrap_or("").to_owned(),
             ..Default::default()
-        };
-
-        let path = Path::new(
-            matches
-                .value_of("config")
-                .unwrap_or_else(|| settings.path.as_str()),
-        );
+        }
+    }
+    pub fn read_config(&self) -> Result<Config, config::ConfigError> {
+        let path = Path::new(&self.path);
         if !path.is_file() && std::fs::write(path, DEFAULT_CONFIG_FILE).is_err() {
             error!("Can't create default config file 'config.yml', use default config and command line args.");
         }
-
         let mut cfg = Config::default();
         cfg.merge(
             config::File::from(path)
                 .required(false)
                 .format(FileFormat::Yaml),
         )?;
-        Ok((settings, cfg))
+        Ok(cfg)
     }
-    pub fn done(&mut self, matches: clap::ArgMatches, cfg: Config) {
-        let cfg = &cfg;
-
+    pub fn done(&mut self, matches: &clap::ArgMatches, cfg: &Config) {
         if let Some(s) = get_str(&matches, cfg, "mac") {
             self.mac = Some(MacAddr::from_str(&s).expect("Can't parse MAC address!"));
         }
