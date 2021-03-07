@@ -1,15 +1,11 @@
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
 
+use log::{error, info};
 use trust_dns_resolver::config::{NameServerConfig, Protocol, ResolverConfig, ResolverOpts};
 use trust_dns_resolver::Resolver;
 
 use crate::settings::Settings;
-
-#[cfg(not(feature = "enablelog"))]
-use crate::{error, info};
-#[cfg(feature = "enablelog")]
-use log::{error, info};
 
 pub fn resolve_dns(settings: &Settings) -> Option<(IpAddr, SocketAddr)> {
     info!("DNS resolving...");
@@ -101,9 +97,4 @@ impl Socket {
         let v = buffer[..size].to_vec();
         Ok(v)
     }
-}
-
-#[test]
-fn test() {
-    error!("error test");
 }

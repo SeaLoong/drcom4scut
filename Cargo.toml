@@ -15,6 +15,7 @@ crossbeam-channel = "0.5"
 encoding_rs = "0.8"
 hex = "0.4"
 hostname = "0.3"
+log = "0.4"
 md-5 = "0.9"
 pnet = "0.27"
 rand = "0.8"
@@ -24,10 +25,6 @@ trust-dns-resolver = "0.20"
 version = "0.10"
 default-features = false
 features = ["yaml"]
-
-[dependencies.log]
-version = "0.4"
-optional = true
 
 [dependencies.log4rs]
 version = "1"
@@ -41,6 +38,6 @@ lto = true
 panic = 'abort'
 
 [features]
-enablelog = ["log", "log4rs"]
+enablelog = ["log4rs"]
 
 default = ["enablelog"]

@@ -1,7 +1,6 @@
 #![feature(ip, once_cell)]
 mod device;
 mod eap;
-mod macros;
 mod settings;
 mod socket;
 mod udp;
@@ -14,15 +13,12 @@ use std::thread;
 use std::time::Duration;
 
 use clap::{clap_app, crate_authors, crate_description, crate_name, crate_version, ArgMatches};
+use log::LevelFilter::{self, Debug, Info};
+use log::{error, info};
 
 use crate::settings::Settings;
 use crate::socket::Socket;
 use crate::util::{sleep_at, ChannelData, State};
-
-#[cfg(feature = "enablelog")]
-use log::LevelFilter::{self, Debug, Info};
-#[cfg(feature = "enablelog")]
-use log::{debug, error, info, trace, warn};
 
 #[cfg(feature = "enablelog")]
 fn init_logger(settings: &Settings) {
@@ -109,6 +105,7 @@ fn init_logger(settings: &Settings) {
 
 #[test]
 fn test_logger() {
+    use log::{debug, error, info, trace, warn};
     #[cfg(feature = "enablelog")]
     init_logger(&Settings::default());
     trace!("trace test");
@@ -136,7 +133,6 @@ fn get_matches<'a>() -> ArgMatches<'a> {
         (@arg time: -t --time +takes_value "(Optional) Time to reconnect automatically after you are not allowed to access Internet. Default value is 7:00.")
         (@arg noudp: --noudp "Disable UDP Process.")
     );
-    #[cfg(feature = "enablelog")]
     let app = app.arg(clap::Arg::with_name("nolog").long("nolog").help(
         "Disable logger, no any output at all, unless PANIC or EXCEPTION of program occurred.",
     ));
@@ -184,13 +180,10 @@ fn main() {
     info!("Retry Count: {}", settings.retry.count);
     info!("Retry Interval: {}ms", settings.retry.interval);
 
-    #[cfg(feature = "enablelog")]
-    {
-        info!("Log to console: {}", settings.log.enable_console);
-        info!("Log to file: {}", settings.log.enable_file);
-        info!("Log File Directory: {}", settings.log.file_directory);
-        info!("Log Level: {}", settings.log.level);
-    }
+    info!("Log to console: {}", settings.log.enable_console);
+    info!("Log to file: {}", settings.log.enable_file);
+    info!("Log File Directory: {}", settings.log.file_directory);
+    info!("Log Level: {}", settings.log.level);
 
     let mac = device.mac;
     let ip = device.ip_net.ip();
@@ -271,7 +264,7 @@ fn main() {
     } else {
         loop {
             let rx_recv = rx.recv().expect("Unexpected! EAPtoUDP channel is closed.");
-            if State::Success == rx_recv.state {
+            if let State::Success = rx_recv.state {
                 tx.send(rx_recv).expect("Can't send initial SUCCESS!");
                 break;
             }
