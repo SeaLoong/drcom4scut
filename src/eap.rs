@@ -333,10 +333,10 @@ impl<'a> Process<'a> {
                                 continue;
                             }
                             match eap_header.eap_type.unwrap() {
-                                eap_types::IDENTITY => {
+                                EAPType::IDENTITY => {
                                     self.on_request_identity(&eth_header, &eap_header)
                                 }
-                                eap_types::NOTIFICATION => {
+                                EAPType::NOTIFICATION => {
                                     ret = self.on_request_notification(&eap_header, bytes); // sleep if true
                                     if ret {
                                         if let Err(e) = self.tx.try_send(ChannelData {
@@ -351,13 +351,9 @@ impl<'a> Process<'a> {
                                     }
                                     self.stop.store(true, Ordering::Release);
                                 }
-                                eap_types::MD5_CHALLENGE => {
+                                EAPType::Md5Challenge => {
                                     self.on_request_md5_challenge(&eap_header, bytes)
                                 }
-                                _ => error!(
-                                    "Unexpected packet EAP Type: {}",
-                                    eap_header.eap_type.unwrap().0
-                                ),
                             }
                         }
                         eap_codes::RESPONSE => {
@@ -579,7 +575,7 @@ impl<'a> Process<'a> {
             code: eap_codes::RESPONSE,
             identifier: eap_header.identifier,
             length,
-            eap_type: Some(eap_types::IDENTITY),
+            eap_type: Some(EAPType::IDENTITY),
         }
         .append_to(data);
         data.put(payload);
@@ -623,7 +619,7 @@ impl<'a> Process<'a> {
             code: eap_codes::RESPONSE,
             identifier: eap_header.identifier,
             length,
-            eap_type: Some(eap_types::MD5_CHALLENGE),
+            eap_type: Some(EAPType::Md5Challenge),
         }
         .append_to(data);
         data.put(payload);
