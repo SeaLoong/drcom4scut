@@ -33,11 +33,24 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Settings {
+            debug: false,
+            noudp: false,
+            nolog: false,
             path: String::from("config.yml"),
+            mac: None,
+            ip: None,
+            username: String::new(),
+            password: String::new(),
+            dns: Vec::new(),
             host: String::from("s.scut.edu.cn"),
+            hostname: String::new(),
             time: NaiveTime::from_hms(7, 0, 0),
             reconnect: 15,
-            ..Default::default()
+            heartbeat: Heartbeat::default(),
+            retry: Retry::default(),
+            data: Data::default(),
+            #[cfg(feature = "enablelog")]
+            log: Log::default(),
         }
     }
 }
@@ -194,7 +207,10 @@ impl Settings {
             debug: matches.is_present("debug"),
             noudp: matches.is_present("noudp"),
             nolog: matches.is_present("nolog"),
-            path: matches.value_of("config").unwrap_or("").to_owned(),
+            path: matches
+                .value_of("config")
+                .unwrap_or("config.yml")
+                .to_owned(),
             ..Default::default()
         }
     }
