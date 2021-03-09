@@ -8,6 +8,7 @@ use std::time::Duration;
 use bytes::BytesMut;
 use chrono::Local;
 use crossbeam_channel::{unbounded, Receiver, Sender, TryRecvError};
+use log::{debug, error, info};
 use pnet::datalink::MacAddr;
 
 use crate::settings::Settings;
@@ -17,11 +18,6 @@ use crate::udp::packet::{
     MiscInfo,
 };
 use crate::util::{self, random_vec, sleep, ChannelData, State};
-
-#[cfg(not(feature = "enablelog"))]
-use crate::{debug, error, info};
-#[cfg(feature = "enablelog")]
-use log::{debug, error, info};
 
 mod packet;
 
@@ -617,9 +613,4 @@ impl<'a> Process<'a> {
 fn test() {
     dbg!(encoding_rs::GB18030.decode_with_bom_removal(hex::decode("d7d432303139c4ea39d4c23239c8d5c6f0a3acc8e7d0e8d4dacee5c9bdd0a3c7f8b0ecc0edcdf8c2e7d6d0d0c4cfe0b9d8d2b5cef1a3acc7ebd2c6b2bdd6c1cee5c9bdd0a3c7f831bac5c2a5caa6c9fab7fecef1d6d0d0c4d2bbc2a5b6abb2e0b4f3ccfc31d6c135bac5b4b0bfdaa1a3cfeacfb8d0c5cfa2c7ebbcfb687474703a2f2f7765622e736375742e6564752e636e2f323031392f303932352f633135323835613333353931312f706167652e68746d00").unwrap().as_slice()));
     dbg!(encoding_rs::GB18030.decode_with_bom_removal(hex::decode("d6c2d0a3d4b0cdf8d3c3bba7a3accfd6d2d1b7a2b2bcc6bbb9fbb5e7c4d4d0c2b0e6c8cfd6a4bfcdbba7b6cba3acd6a7b3d6a1be6d61634f532031302e313520436174616c696e61a1bfa3acbfc9b5bd20687474703a2f2f3230322e33382e3139332e36352f20cfc2d4d8a1a3cad7b4ceb0b2d7b0c7b0a3acd0e8cfc8b6cfbfaad3d0cfdfc1acbdd3bbf2b0ceb3f6cdf8cfdfa3acc8bbbaf3b5c7c2bdcedecfdfcdf8c2e7a3acd4d9bdf8d0d0b0b2d7b0a1a3c8e7c4fad3d0c6e4cbfcd2c9cecaa3acbbb6d3add6").unwrap().as_slice()));
-}
-
-#[test]
-fn test_log() {
-    debug!("debug test");
 }

@@ -6,12 +6,8 @@ use std::str::FromStr;
 
 use chrono::NaiveTime;
 use config::{Config, FileFormat, Value};
-use pnet::datalink::MacAddr;
-
-#[cfg(not(feature = "enablelog"))]
-use crate::error;
-#[cfg(feature = "enablelog")]
 use log::error;
+use pnet::datalink::MacAddr;
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
 pub struct Settings {
@@ -31,19 +27,30 @@ pub struct Settings {
     pub heartbeat: Heartbeat,
     pub retry: Retry,
     pub data: Data,
-
-    #[cfg(feature = "enablelog")]
     pub log: Log,
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Settings {
+            debug: false,
+            noudp: false,
+            nolog: false,
             path: String::from("config.yml"),
+            mac: None,
+            ip: None,
+            username: String::new(),
+            password: String::new(),
+            dns: Vec::new(),
             host: String::from("s.scut.edu.cn"),
+            hostname: String::new(),
             time: NaiveTime::from_hms(7, 0, 0),
             reconnect: 15,
-            ..Default::default()
+            heartbeat: Heartbeat::default(),
+            retry: Retry::default(),
+            data: Data::default(),
+            #[cfg(feature = "enablelog")]
+            log: Log::default(),
         }
     }
 }
@@ -78,7 +85,6 @@ impl Default for Retry {
     }
 }
 
-#[cfg(feature = "enablelog")]
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
 pub struct Log {
     pub enable_console: bool,
@@ -87,7 +93,6 @@ pub struct Log {
     pub level: String,
 }
 
-#[cfg(feature = "enablelog")]
 impl Default for Log {
     fn default() -> Self {
         Log {
@@ -202,7 +207,10 @@ impl Settings {
             debug: matches.is_present("debug"),
             noudp: matches.is_present("noudp"),
             nolog: matches.is_present("nolog"),
-            path: matches.value_of("config").unwrap_or("").to_owned(),
+            path: matches
+                .value_of("config")
+                .unwrap_or("config.yml")
+                .to_owned(),
             ..Default::default()
         }
     }
@@ -290,7 +298,6 @@ impl Settings {
             }
         }
 
-        #[cfg(feature = "enablelog")]
         if let Ok(map) = cfg.get_table("log") {
             if let Some(x) = get_bool_from_map(&map, "enable_console") {
                 self.log.enable_console = x;
@@ -431,8 +438,3 @@ data:
     version:
     hash:
 ";
-
-#[test]
-fn test_log() {
-    error!("error test");
-}

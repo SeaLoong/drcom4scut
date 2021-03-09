@@ -8,6 +8,7 @@ use std::time::Duration;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use chrono::Local;
 use crossbeam_channel::{unbounded, Receiver, Sender, TryRecvError};
+use log::{debug, error, info, warn};
 use md5::Digest;
 use pnet::datalink::MacAddr;
 
@@ -15,11 +16,6 @@ use crate::device::Device;
 use crate::eap::packet::*;
 use crate::settings::Settings;
 use crate::util::{ip_to_vec, sleep, ChannelData, State};
-
-#[cfg(not(feature = "enablelog"))]
-use crate::{debug, error, info, warn};
-#[cfg(feature = "enablelog")]
-use log::{debug, error, info, warn};
 
 mod packet;
 
@@ -337,10 +333,10 @@ impl<'a> Process<'a> {
                                 continue;
                             }
                             match eap_header.eap_type.unwrap() {
-                                eap_types::IDENTITY => {
+                                EAPType::IDENTITY => {
                                     self.on_request_identity(&eth_header, &eap_header)
                                 }
-                                eap_types::NOTIFICATION => {
+                                EAPType::NOTIFICATION => {
                                     ret = self.on_request_notification(&eap_header, bytes); // sleep if true
                                     if ret {
                                         if let Err(e) = self.tx.try_send(ChannelData {
@@ -355,13 +351,9 @@ impl<'a> Process<'a> {
                                     }
                                     self.stop.store(true, Ordering::Release);
                                 }
-                                eap_types::MD5_CHALLENGE => {
+                                EAPType::Md5Challenge => {
                                     self.on_request_md5_challenge(&eap_header, bytes)
                                 }
-                                _ => error!(
-                                    "Unexpected packet EAP Type: {}",
-                                    eap_header.eap_type.unwrap().0
-                                ),
                             }
                         }
                         eap_codes::RESPONSE => {
@@ -583,7 +575,7 @@ impl<'a> Process<'a> {
             code: eap_codes::RESPONSE,
             identifier: eap_header.identifier,
             length,
-            eap_type: Some(eap_types::IDENTITY),
+            eap_type: Some(EAPType::IDENTITY),
         }
         .append_to(data);
         data.put(payload);
@@ -627,7 +619,7 @@ impl<'a> Process<'a> {
             code: eap_codes::RESPONSE,
             identifier: eap_header.identifier,
             length,
-            eap_type: Some(eap_types::MD5_CHALLENGE),
+            eap_type: Some(EAPType::Md5Challenge),
         }
         .append_to(data);
         data.put(payload);
@@ -644,9 +636,4 @@ fn test_md5_calc() {
     data.put(&hex::decode("ff62b079ca26d283ca26d28300000000").unwrap()[..]);
     let r = hex::encode(md5::Md5::digest(&data)).to_lowercase();
     assert_eq!(&r, "313a3758ad589ce03dc6af0371c31239");
-}
-
-#[test]
-fn test_log() {
-    debug!("debug test");
 }

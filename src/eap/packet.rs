@@ -3,7 +3,6 @@ use crate::util::{get_mac, put_mac};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use pnet::datalink::MacAddr;
 
-#[derive(Debug, Default, PartialEq, Eq, Hash, Clone)]
 pub struct Header {
     pub ethernet_header: Option<EthernetHeader>,
     pub eapol_header: Option<EAPOLHeader>,
@@ -33,14 +32,13 @@ impl Header {
     }
 }
 
-#[derive(Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Clone, Copy)]
+#[derive(PartialEq, Eq)]
 pub struct EthernetType(pub u16);
 pub mod ethernet_types {
     use crate::eap::packet::EthernetType;
     pub const IEEE8021X: EthernetType = EthernetType(0x888e);
 }
 
-#[derive(Debug, Default, PartialEq, Eq, Hash, Clone)]
 pub struct EthernetHeader {
     // 0~13
     pub destination: MacAddr,
@@ -126,16 +124,13 @@ pub mod eap_codes {
     pub const FAILURE: EAPCode = EAPCode(4);
 }
 
-#[derive(Debug, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Clone, Copy)]
-pub struct EAPType(pub u8);
-pub mod eap_types {
-    use crate::eap::packet::EAPType;
-    pub const IDENTITY: EAPType = EAPType(1);
-    pub const NOTIFICATION: EAPType = EAPType(2);
-    pub const MD5_CHALLENGE: EAPType = EAPType(4);
+#[derive(Clone, Copy)]
+pub enum EAPType {
+    IDENTITY = 1,
+    NOTIFICATION = 2,
+    Md5Challenge = 4,
 }
 
-#[derive(Debug, Default, PartialEq, Eq, Hash, Clone)]
 pub struct EAPHeader {
     // 18~21/22
     pub code: EAPCode,
@@ -151,7 +146,7 @@ impl EAPHeader {
         data.put_u8(self.identifier);
         data.put_u16(self.length);
         if let Some(t) = self.eap_type {
-            data.put_u8(t.0);
+            data.put_u8(t as u8);
         }
     }
     #[inline]
@@ -166,7 +161,12 @@ impl EAPHeader {
             eap_type: if data.is_empty() {
                 None
             } else {
-                Some(EAPType(data.get_u8()))
+                match data.get_u8() {
+                    1 => Some(EAPType::IDENTITY),
+                    2 => Some(EAPType::NOTIFICATION),
+                    4 => Some(EAPType::Md5Challenge),
+                    _ => None,
+                }
             },
         })
     }
