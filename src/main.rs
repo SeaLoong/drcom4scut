@@ -12,15 +12,14 @@ use std::thread;
 use std::time::Duration;
 
 use clap::{clap_app, crate_authors, crate_description, crate_name, crate_version, ArgMatches};
-use log::LevelFilter;
-use log::{error, info};
+use log::{error, info, LevelFilter};
 
 use crate::settings::Settings;
 use crate::socket::Socket;
 use crate::util::{sleep_at, ChannelData, State};
 
 fn init_logger(settings: &Settings) {
-    if !settings.debug && settings.log.level_filter == LevelFilter::Off {
+    if let LevelFilter::Off = settings.log.level_filter {
         return;
     }
     #[cfg(feature = "enablelog")]
@@ -82,12 +81,6 @@ fn init_log4rs(settings: &Settings) {
         return;
     }
 
-    let level_filter = if settings.debug {
-        LevelFilter::Debug
-    } else {
-        settings.log.level_filter
-    };
-
     let mut config = Config::builder();
     let mut root = Root::builder();
     if let Some(stdout) = stdout {
@@ -100,7 +93,7 @@ fn init_log4rs(settings: &Settings) {
     }
 
     let config = config
-        .build(root.build(level_filter))
+        .build(root.build(settings.log.level_filter))
         .expect("Can't build log config!");
 
     log4rs::init_config(config).expect("Can't init log config!");

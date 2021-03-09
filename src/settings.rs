@@ -208,15 +208,22 @@ impl Settings {
                 .value_of("config")
                 .unwrap_or("config.yml")
                 .to_owned(),
-            log: Log {
-                level_filter: if matches.is_present("debug") {
-                    LevelFilter::Debug
-                } else if matches.is_present("nolog") {
-                    LevelFilter::Off
-                } else {
-                    LevelFilter::Info
-                },
-                ..Default::default()
+            log: if matches.is_present("nolog") {
+                Log {
+                    enable_console: false,
+                    enable_file: false,
+                    file_directory: String::default(),
+                    level_filter: LevelFilter::Off,
+                }
+            } else {
+                Log {
+                    level_filter: if matches.is_present("debug") {
+                        LevelFilter::Debug
+                    } else {
+                        LevelFilter::Info
+                    },
+                    ..Default::default()
+                }
             },
             ..Default::default()
         }
@@ -304,34 +311,27 @@ impl Settings {
                 self.retry.interval = max(x as i32, self.retry.interval);
             }
         }
-        if self.log.level_filter == LevelFilter::Off {
-            self.log = Log {
-                enable_console: false,
-                enable_file: false,
-                file_directory: String::default(),
-                level_filter: LevelFilter::Off,
-            }
-        } else if let Ok(map) = cfg.get_table("log") {
-            if let Some(x) = get_bool_from_map(&map, "enable_console") {
-                self.log.enable_console = x;
-            }
-            if let Some(x) = get_bool_from_map(&map, "enable_file") {
-                self.log.enable_file = x;
-            }
-            if let Some(x) = get_str_from_map(&map, "file_directory") {
-                self.log.file_directory = x;
-            }
-            self.log.level_filter = if self.debug {
-                LevelFilter::Debug
-            } else if let Some(Ok(level_filter)) = get_str_from_map(&map, "level")
-                .map(|x| LevelFilter::from_str(x.to_ascii_uppercase().as_str()))
-            {
-                level_filter
-            } else {
-                self.log.level_filter
+
+        if self.log.level_filter != LevelFilter::Off {
+            if let Ok(map) = cfg.get_table("log") {
+                if let Some(x) = get_bool_from_map(&map, "enable_console") {
+                    self.log.enable_console = x;
+                }
+                if let Some(x) = get_bool_from_map(&map, "enable_file") {
+                    self.log.enable_file = x;
+                }
+                if let Some(x) = get_str_from_map(&map, "file_directory") {
+                    self.log.file_directory = x;
+                }
+                if self.debug {
+                    if let Some(Ok(level_filter)) = get_str_from_map(&map, "level")
+                        .map(|x| LevelFilter::from_str(x.to_ascii_uppercase().as_str()))
+                    {
+                        self.log.level_filter = level_filter;
+                    }
+                }
             }
         }
-
         if let Ok(data) = cfg.get_table("data") {
             if let Some(map) = get_map_from_map(&data, "response_identity") {
                 if let Some(s) = get_str_from_map(&map, "unknown") {
