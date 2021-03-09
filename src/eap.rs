@@ -333,10 +333,10 @@ impl<'a> Process<'a> {
                                 continue;
                             }
                             match eap_header.eap_type.unwrap() {
-                                EAPType::IDENTITY => {
+                                EAPType::Identity => {
                                     self.on_request_identity(&eth_header, &eap_header)
                                 }
-                                EAPType::NOTIFICATION => {
+                                EAPType::Notification => {
                                     ret = self.on_request_notification(&eap_header, bytes); // sleep if true
                                     if ret {
                                         if let Err(e) = self.tx.try_send(ChannelData {
@@ -575,7 +575,7 @@ impl<'a> Process<'a> {
             code: eap_codes::RESPONSE,
             identifier: eap_header.identifier,
             length,
-            eap_type: Some(EAPType::IDENTITY),
+            eap_type: Some(EAPType::Identity),
         }
         .append_to(data);
         data.put(payload);

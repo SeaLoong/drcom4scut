@@ -7,24 +7,27 @@ mod udp;
 mod util;
 
 use std::lazy::SyncLazy;
-use std::str::FromStr;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
 use clap::{clap_app, crate_authors, crate_description, crate_name, crate_version, ArgMatches};
-use log::LevelFilter::{self, Debug, Info};
+use log::LevelFilter;
 use log::{error, info};
 
 use crate::settings::Settings;
 use crate::socket::Socket;
 use crate::util::{sleep_at, ChannelData, State};
 
-#[cfg(feature = "enablelog")]
 fn init_logger(settings: &Settings) {
-    if !settings.debug && settings.nolog {
+    if !settings.debug && settings.log.level_filter == LevelFilter::Off {
         return;
     }
+    #[cfg(feature = "enablelog")]
+    init_log4rs(settings);
+}
+#[cfg(feature = "enablelog")]
+fn init_log4rs(settings: &Settings) {
     use log4rs::{
         append::{
             console::ConsoleAppender,
@@ -79,10 +82,10 @@ fn init_logger(settings: &Settings) {
         return;
     }
 
-    let level = if settings.debug {
-        Debug
+    let level_filter = if settings.debug {
+        LevelFilter::Debug
     } else {
-        LevelFilter::from_str(&settings.log.level).unwrap_or(Info)
+        settings.log.level_filter
     };
 
     let mut config = Config::builder();
@@ -97,7 +100,7 @@ fn init_logger(settings: &Settings) {
     }
 
     let config = config
-        .build(root.build(level))
+        .build(root.build(level_filter))
         .expect("Can't build log config!");
 
     log4rs::init_config(config).expect("Can't init log config!");
@@ -183,7 +186,7 @@ fn main() {
     info!("Log to console: {}", settings.log.enable_console);
     info!("Log to file: {}", settings.log.enable_file);
     info!("Log File Directory: {}", settings.log.file_directory);
-    info!("Log Level: {}", settings.log.level);
+    info!("Log Level: {}", settings.log.level_filter);
 
     let mac = device.mac;
     let ip = device.ip_net.ip();
