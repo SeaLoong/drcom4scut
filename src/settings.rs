@@ -6,14 +6,13 @@ use std::str::FromStr;
 
 use chrono::NaiveTime;
 use config::{Config, FileFormat, Value};
-use log::error;
+use log::{error, LevelFilter};
 use pnet::datalink::MacAddr;
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
 pub struct Settings {
     pub debug: bool,
     pub noudp: bool,
-    pub nolog: bool,
     pub path: String,
     pub mac: Option<MacAddr>,
     pub ip: Option<IpAddr>,
@@ -35,7 +34,6 @@ impl Default for Settings {
         Settings {
             debug: false,
             noudp: false,
-            nolog: false,
             path: String::from("config.yml"),
             mac: None,
             ip: None,
@@ -90,7 +88,7 @@ pub struct Log {
     pub enable_console: bool,
     pub enable_file: bool,
     pub file_directory: String,
-    pub level: String,
+    pub level_filter: LevelFilter,
 }
 
 impl Default for Log {
@@ -99,7 +97,7 @@ impl Default for Log {
             enable_console: true,
             enable_file: true,
             file_directory: String::from("./logs"),
-            level: String::from("INFO"),
+            level_filter: LevelFilter::Info,
         }
     }
 }
@@ -206,11 +204,27 @@ impl Settings {
         Settings {
             debug: matches.is_present("debug"),
             noudp: matches.is_present("noudp"),
-            nolog: matches.is_present("nolog"),
             path: matches
                 .value_of("config")
                 .unwrap_or("config.yml")
                 .to_owned(),
+            log: if matches.is_present("nolog") {
+                Log {
+                    enable_console: false,
+                    enable_file: false,
+                    file_directory: String::default(),
+                    level_filter: LevelFilter::Off,
+                }
+            } else {
+                Log {
+                    level_filter: if matches.is_present("debug") {
+                        LevelFilter::Debug
+                    } else {
+                        LevelFilter::Info
+                    },
+                    ..Default::default()
+                }
+            },
             ..Default::default()
         }
     }
@@ -298,21 +312,26 @@ impl Settings {
             }
         }
 
-        if let Ok(map) = cfg.get_table("log") {
-            if let Some(x) = get_bool_from_map(&map, "enable_console") {
-                self.log.enable_console = x;
-            }
-            if let Some(x) = get_bool_from_map(&map, "enable_file") {
-                self.log.enable_file = x;
-            }
-            if let Some(x) = get_str_from_map(&map, "file_directory") {
-                self.log.file_directory = x;
-            }
-            if let Some(x) = get_str_from_map(&map, "level") {
-                self.log.level = x;
+        if self.log.level_filter != LevelFilter::Off {
+            if let Ok(map) = cfg.get_table("log") {
+                if let Some(x) = get_bool_from_map(&map, "enable_console") {
+                    self.log.enable_console = x;
+                }
+                if let Some(x) = get_bool_from_map(&map, "enable_file") {
+                    self.log.enable_file = x;
+                }
+                if let Some(x) = get_str_from_map(&map, "file_directory") {
+                    self.log.file_directory = x;
+                }
+                if self.debug {
+                    if let Some(Ok(level_filter)) = get_str_from_map(&map, "level")
+                        .map(|x| LevelFilter::from_str(x.to_ascii_uppercase().as_str()))
+                    {
+                        self.log.level_filter = level_filter;
+                    }
+                }
             }
         }
-
         if let Ok(data) = cfg.get_table("data") {
             if let Some(map) = get_map_from_map(&data, "response_identity") {
                 if let Some(s) = get_str_from_map(&map, "unknown") {

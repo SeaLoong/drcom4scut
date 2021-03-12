@@ -126,8 +126,8 @@ pub mod eap_codes {
 
 #[derive(Clone, Copy)]
 pub enum EAPType {
-    IDENTITY = 1,
-    NOTIFICATION = 2,
+    Identity = 1,
+    Notification = 2,
     Md5Challenge = 4,
 }
 
@@ -162,8 +162,8 @@ impl EAPHeader {
                 None
             } else {
                 match data.get_u8() {
-                    1 => Some(EAPType::IDENTITY),
-                    2 => Some(EAPType::NOTIFICATION),
+                    1 => Some(EAPType::Identity),
+                    2 => Some(EAPType::Notification),
                     4 => Some(EAPType::Md5Challenge),
                     _ => None,
                 }
