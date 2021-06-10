@@ -17,7 +17,7 @@ hex = "0.4"
 hostname = "0.3"
 log = "0.4"
 md-5 = "0.9"
-pnet = "0.27"
+pnet = "0.28"
 rand = "0.8"
 trust-dns-resolver = "0.20"
 
