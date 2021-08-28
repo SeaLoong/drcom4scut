@@ -32,7 +32,7 @@ features = ["gzip"]
 optional = true
 
 [profile.release]
-opt-level = "z"
+opt-level = 3
 codegen-units = 1
 lto = true
 panic = 'abort'
