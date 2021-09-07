@@ -416,44 +416,4 @@ impl Settings {
     }
 }
 
-const DEFAULT_CONFIG_FILE: &str = "\
-mac:
-ip:
-username:
-password:
-dns:
-  - 202.38.193.33
-  - 222.201.130.30
-  - 202.112.17.33
-  - 222.201.130.33
-host: s.scut.edu.cn
-hostname:
-time: 7:00
-reconnect: 15
-heartbeat:
-  eap_timeout: 60
-  udp_timeout: 12
-retry:
-  count: 2
-  interval: 5000
-log:
-  enable_console: true
-  enable_file: true
-  file_directory: ./logs
-  level: INFO
-data:
-  response_identity:
-    unknown:
-  response_md5_challenge:
-    unknown:
-  misc_info:
-    unknown1:
-    cks32_param:
-    unknown2:
-    os_major:
-    os_minor:
-    os_build:
-    os_unknown:
-    version:
-    hash:
-";
+const DEFAULT_CONFIG_FILE: &str = include_str!("default_config.yml");
