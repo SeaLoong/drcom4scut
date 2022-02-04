@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use clap::{clap_app, crate_authors, crate_description, crate_name, crate_version, ArgMatches};
+use clap::*;
 use log::{error, info, LevelFilter};
 
 use crate::settings::Settings;
@@ -110,8 +110,50 @@ fn test_logger() {
     warn!("warn test");
     error!("error test");
 }
-
-fn get_matches<'a>() -> ArgMatches<'a> {
+// 改为声明式api
+// # example
+#[derive(Parser, Debug, Clone)]
+#[clap(author, version, about)]
+struct Args {
+    /// Enable debug mode.
+    #[clap(long)]
+    debug: bool,
+    /// Path to config file. Some settings only can be set by config file.
+    #[clap(long, short)]
+    config: Option<String>,
+    /// Ethernet Device MAC address.
+    #[clap(long, short)]
+    mac: Option<String>,
+    /// IP address of the selected Ethernet Device.
+    #[clap(long, short)]
+    ip: Option<String>,
+    /// Username to authorize.
+    #[clap(long, short)]
+    username: String,
+    /// Password to authorize.
+    #[clap(long, short)]
+    password: String,
+    /// DNS server. If more than one, you can add the remain DNS servers to config file.
+    #[clap(long, short)]
+    dns: Option<String>,
+    /// Host to connect UDP server. Default value is 's.scut.edu.cn'.
+    #[clap(long, short = 'H')]
+    host: Option<String>,
+    /// Default value is current computer host name.
+    #[clap(long, short = 'N')]
+    hostname: Option<String>,
+    /// Time to reconnect automatically after you are not allowed to access Internet. Default value is 7:00.
+    #[clap(long, short)]
+    time: Option<String>,
+    /// Disable UDP Process.
+    #[clap(long)]
+    noudp: bool,
+    /// Disable logger, no any output at all, unless PANIC or EXCEPTION of program occurred.
+    #[clap(long)]
+    nolog: bool,
+}
+// 此方法已弃用
+fn get_matches() -> ArgMatches {
     use clap::*;
     let app = clap_app!((crate_name!()) =>
         (version: crate_version!())
