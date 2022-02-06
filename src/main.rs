@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-use clap::{clap_app, crate_authors, crate_description, crate_name, crate_version, ArgMatches};
+use clap::ArgMatches;
 use log::{error, info, LevelFilter};
 
 use crate::settings::Settings;
@@ -110,29 +110,70 @@ fn test_logger() {
     warn!("warn test");
     error!("error test");
 }
+// 若改为声明式api
+// example
+// use clap::Parser;
+// #[derive(Parser, Debug, Clone)]
+// #[clap(author, version, about)]
+// struct Args {
+//     /// Enable debug mode.
+//     #[clap(long)]
+//     debug: bool,
+//     /// Path to config file. Some settings only can be set by config file.
+//     #[clap(long, short)]
+//     config: Option<String>,
+//     /// Ethernet Device MAC address.
+//     #[clap(long, short)]
+//     mac: Option<String>,
+//     /// IP address of the selected Ethernet Device.
+//     #[clap(long, short)]
+//     ip: Option<String>,
+//     /// Username to authorize.
+//     #[clap(long, short)]
+//     username: String,
+//     /// Password to authorize.
+//     #[clap(long, short)]
+//     password: String,
+//     /// DNS server. If more than one, you can add the remain DNS servers to config file.
+//     #[clap(long, short)]
+//     dns: Option<String>,
+//     /// Host to connect UDP server. Default value is 's.scut.edu.cn'.
+//     #[clap(long, short = 'H')]
+//     host: Option<String>,
+//     /// Default value is current computer host name.
+//     #[clap(long, short = 'N')]
+//     hostname: Option<String>,
+//     /// Time to reconnect automatically after you are not allowed to access Internet. Default value is 7:00.
+//     #[clap(long, short)]
+//     time: Option<String>,
+//     /// Disable UDP Process.
+//     #[clap(long)]
+//     noudp: bool,
+//     /// Disable logger, no any output at all, unless PANIC or EXCEPTION of program occurred.
+//     #[clap(long)]
+//     nolog: bool,
+// }
 
-fn get_matches<'a>() -> ArgMatches<'a> {
+fn get_matches() -> ArgMatches {
     use clap::*;
-    let app = clap_app!((crate_name!()) =>
-        (version: crate_version!())
-        (author: crate_authors!())
-        (about: crate_description!())
-        (@arg debug: --debug "Enable debug mode.")
-        (@arg config: -c --config +takes_value "(Optional) Path to config file. Some settings only can be set by config file.")
-        (@arg mac: -m --mac +takes_value "(Optional) Ethernet Device MAC address.")
-        (@arg ip: -i --ip +takes_value "(Optional) IP address of the selected Ethernet Device.")
-        (@arg username: -u --username +takes_value "Username to authorize.")
-        (@arg password: -p --password +takes_value "Password to authorize.")
-        (@arg dns: -d --dns +takes_value "(Optional) DNS server. If more than one, you can add the remain DNS servers to config file.")
-        (@arg host: -H --host +takes_value "(Optional) Host to connect UDP server. Default value is 's.scut.edu.cn'.")
-        (@arg hostname: -N --hostname +takes_value "(Optional) Default value is current computer host name.")
-        (@arg time: -t --time +takes_value "(Optional) Time to reconnect automatically after you are not allowed to access Internet. Default value is 7:00.")
-        (@arg noudp: --noudp "Disable UDP Process.")
-    );
-    let app = app.arg(clap::Arg::with_name("nolog").long("nolog").help(
-        "Disable logger, no any output at all, unless PANIC or EXCEPTION of program occurred.",
-    ));
-
+    let app=app_from_crate!()
+    .version(crate_version!())
+    .author(crate_authors!())
+    .about(crate_description!())
+    .args(&[
+        arg!(--debug "Enable debug mode."),
+        arg!(--noudp "Disable UDP Process."),
+        arg!(--nolog "Disable logger, no any output at all, unless PANIC or EXCEPTION of program occurred."),
+        arg!(-c --config <config> "Path to config file. Some settings only can be set by config file.").required(false),
+        arg!(-m --mac <mac> "Ethernet Device MAC address.").required(false),
+        arg!(-i --ip <ip> "IP address of the selected Ethernet Device.").required(false),
+        arg!(-u --username <username> "Username to authorize.").required(false),
+        arg!(-p --password <password> "Password to authorize.").required(false),
+        arg!(-d --dns <dns> "DNS server. If more than one, you can add the remain DNS servers to config file.").required(false),
+        arg!(-H --host <host> "Host to connect UDP server. Default value is 's.scut.edu.cn'.").required(false),
+        arg!(-N --hostname <hostname> "Default value is current computer host name.").required(false),
+        arg!(-t --time <time> "Time to reconnect automatically after you are not allowed to access Internet. Default value is 7:00.").required(false),
+    ]);
     app.get_matches()
 }
 
