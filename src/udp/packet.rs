@@ -63,14 +63,10 @@ impl MiscAlive {
 fn append_cks32(v: &mut [u8]) -> u32 {
     let len = (v[2] >> 2) as usize;
     v[28] = 126;
-    let acc = (0..len).map(|x| x << 2).fold([0u8; 4], |mut acc, i| {
-        acc[0] ^= v[i];
-        acc[1] ^= v[i + 1];
-        acc[2] ^= v[i + 2];
-        acc[3] ^= v[i + 3];
-        acc
-    });
-    let s = (acc[3] as u32) << 24 | (acc[2] as u32) << 16 | (acc[1] as u32) << 8 | (acc[0] as u32);
+    let s = v[0..4 * len]
+        .array_chunks()
+        .map(|v| u32::from_le_bytes(*v))
+        .fold(0, |a, b| a ^ b);
     let s = ((s.to_le() as u64) * 19680126) as u32;
     v[24..28].copy_from_slice(&s.to_le_bytes());
     v[28] = 0;
@@ -177,12 +173,10 @@ impl MiscHeartbeat1 {
 }
 
 fn append_cks16(v: &mut [u8]) -> u32 {
-    let acc = (0..20).map(|x| x << 1).fold([0u8; 2], |mut acc, i| {
-        acc[0] ^= v[i];
-        acc[1] ^= v[i + 1];
-        acc
-    });
-    let s = ((acc[1] as u32) << 8) | (acc[0] as u32);
+    let s = v[0..40]
+        .array_chunks()
+        .map(|x| u16::from_le_bytes(*x))
+        .fold(0, |a, b| a ^ b) as u32;
     let s = s.to_le() * 711;
     v[24..28].copy_from_slice(&s.to_le_bytes());
     s

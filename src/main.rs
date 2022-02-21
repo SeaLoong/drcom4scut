@@ -1,4 +1,4 @@
-#![feature(ip, once_cell)]
+#![feature(ip, once_cell, array_chunks)]
 mod device;
 mod eap;
 mod settings;
