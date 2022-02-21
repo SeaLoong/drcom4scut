@@ -60,7 +60,7 @@ impl MiscAlive {
     }
 }
 
-fn append_cks32(v: &mut Vec<u8>) -> u32 {
+fn append_cks32(v: &mut [u8]) -> u32 {
     let len = (v[2] >> 2) as usize;
     v[28] = 126;
     let acc = (0..len).map(|x| x << 2).fold([0u8; 4], |mut acc, i| {
@@ -176,7 +176,7 @@ impl MiscHeartbeat1 {
     }
 }
 
-fn append_cks16(v: &mut Vec<u8>) -> u32 {
+fn append_cks16(v: &mut [u8]) -> u32 {
     let acc = (0..20).map(|x| x << 1).fold([0u8; 2], |mut acc, i| {
         acc[0] ^= v[i];
         acc[1] ^= v[i + 1];
@@ -217,7 +217,7 @@ impl MiscHeartbeat3 {
     }
 }
 
-pub fn decrypt_info(v: &mut Vec<u8>) {
+pub fn decrypt_info(v: &mut [u8]) {
     for (i, val) in v.iter_mut().enumerate() {
         let x = i & 0x07;
         *val = (((*val as u16) << x) + ((*val as u16) >> (8 - x))) as u8;

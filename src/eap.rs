@@ -407,7 +407,7 @@ impl<'a> Process<'a> {
             self.login_start()
         } else {
             self.eth_header.destination = eth_header.source;
-            self.send_response_identity(&eap_header)
+            self.send_response_identity(eap_header)
         }
     }
 
@@ -468,7 +468,7 @@ impl<'a> Process<'a> {
             error!("MD5 Challenge: Unexpected payload!");
         } else {
             self.cancel_resend();
-            self.send_response_md5_challenge(&eap_header, bytes)
+            self.send_response_md5_challenge(eap_header, bytes)
         }
     }
 
