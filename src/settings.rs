@@ -165,26 +165,26 @@ impl Default for MiscInfo {
 }
 
 fn get_str_from_map(map: &HashMap<String, Value>, k: &str) -> Option<String> {
-    map.get(k).and_then(|v| v.to_owned().into_str().ok())
+    map.get(k)?.to_owned().into_string().ok()
 }
 
 fn get_int_from_map(map: &HashMap<String, Value>, k: &str) -> Option<i64> {
-    map.get(k).and_then(|v| v.to_owned().into_int().ok())
+    map.get(k)?.to_owned().into_int().ok()
 }
 
 fn get_bool_from_map(map: &HashMap<String, Value>, k: &str) -> Option<bool> {
-    map.get(k).and_then(|v| v.to_owned().into_bool().ok())
+    map.get(k)?.to_owned().into_bool().ok()
 }
 
 fn get_map_from_map(map: &HashMap<String, Value>, k: &str) -> Option<HashMap<String, Value>> {
-    map.get(k).and_then(|v| v.to_owned().into_table().ok())
+    map.get(k)?.to_owned().into_table().ok()
 }
 
 fn get_str(matches: &clap::ArgMatches, cfg: &config::Config, k: &str) -> Option<String> {
     let s = matches
         .value_of(k)
         .map(|s| s.to_string())
-        .or_else(|| cfg.get_str(k).ok())?;
+        .or_else(|| cfg.get_string(k).ok())?;
     if s.trim().is_empty() {
         None
     } else {
@@ -262,7 +262,7 @@ impl Settings {
         }
         if let Ok(vs) = cfg.get_array("dns") {
             for v in vs {
-                let mut s = v.to_owned().into_str().expect("Invalid DNS server!");
+                let mut s = v.into_string().expect("Invalid DNS server!");
                 if (s.contains(']') && !s.contains("]:")) || !s.contains(':') {
                     s += ":53";
                 }
