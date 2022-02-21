@@ -233,13 +233,9 @@ impl Settings {
         if !path.is_file() && std::fs::write(path, DEFAULT_CONFIG_FILE).is_err() {
             error!("Can't create default config file 'config.yml', use default config and command line args.");
         }
-        let mut cfg = Config::default();
-        cfg.merge(
-            config::File::from(path)
-                .required(false)
-                .format(FileFormat::Yaml),
-        )?;
-        Ok(cfg)
+        Config::builder()
+            .add_source(config::File::new(&self.path, FileFormat::Yaml).required(false))
+            .build()
     }
     pub fn done(&mut self, matches: &clap::ArgMatches, cfg: &Config) {
         if let Some(s) = get_str(&matches, cfg, "mac") {
