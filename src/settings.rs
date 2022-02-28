@@ -165,37 +165,34 @@ impl Default for MiscInfo {
 }
 
 fn get_str_from_map(map: &HashMap<String, Value>, k: &str) -> Option<String> {
-    map.get(k).and_then(|v| v.to_owned().into_str().ok())
+    map.get(k)?.to_owned().into_string().ok()
 }
 
 fn get_int_from_map(map: &HashMap<String, Value>, k: &str) -> Option<i64> {
-    map.get(k).and_then(|v| v.to_owned().into_int().ok())
+    map.get(k)?.to_owned().into_int().ok()
 }
 
 fn get_bool_from_map(map: &HashMap<String, Value>, k: &str) -> Option<bool> {
-    map.get(k).and_then(|v| v.to_owned().into_bool().ok())
+    map.get(k)?.to_owned().into_bool().ok()
 }
 
 fn get_map_from_map(map: &HashMap<String, Value>, k: &str) -> Option<HashMap<String, Value>> {
-    map.get(k).and_then(|v| v.to_owned().into_table().ok())
+    map.get(k)?.to_owned().into_table().ok()
 }
 
 fn get_str(matches: &clap::ArgMatches, cfg: &config::Config, k: &str) -> Option<String> {
-    let s = matches
+    matches
         .value_of(k)
         .map(|s| s.to_string())
-        .or_else(|| cfg.get_str(k).ok())?;
-    if s.trim().is_empty() {
-        None
-    } else {
-        Some(s)
-    }
+        .or_else(|| cfg.get_string(k).ok())
+        .filter(|s| !s.trim().is_empty())
 }
 
 fn get_u64(matches: &clap::ArgMatches, cfg: &config::Config, k: &str) -> Option<u64> {
     matches
-        .value_of(k)
-        .and_then(|s| u64::from_str(s).ok())
+        .value_of(k)?
+        .parse()
+        .ok()
         .or_else(|| cfg.get_int(k).ok().map(|x| x as u64))
 }
 
@@ -233,25 +230,21 @@ impl Settings {
         if !path.is_file() && std::fs::write(path, DEFAULT_CONFIG_FILE).is_err() {
             error!("Can't create default config file 'config.yml', use default config and command line args.");
         }
-        let mut cfg = Config::default();
-        cfg.merge(
-            config::File::from(path)
-                .required(false)
-                .format(FileFormat::Yaml),
-        )?;
-        Ok(cfg)
+        Config::builder()
+            .add_source(config::File::new(&self.path, FileFormat::Yaml).required(false))
+            .build()
     }
     pub fn done(&mut self, matches: &clap::ArgMatches, cfg: &Config) {
-        if let Some(s) = get_str(&matches, cfg, "mac") {
+        if let Some(s) = get_str(matches, cfg, "mac") {
             self.mac = Some(MacAddr::from_str(&s).expect("Can't parse MAC address!"));
         }
 
-        if let Some(s) = get_str(&matches, cfg, "ip") {
+        if let Some(s) = get_str(matches, cfg, "ip") {
             self.ip = Some(IpAddr::from_str(&s).expect("Can't parse IP Address!"));
         }
 
-        self.username = get_str(&matches, cfg, "username").expect("Username is REQUIRED!");
-        self.password = get_str(&matches, cfg, "password").expect("Password is REQUIRED!");
+        self.username = get_str(matches, cfg, "username").expect("Username is REQUIRED!");
+        self.password = get_str(matches, cfg, "password").expect("Password is REQUIRED!");
 
         if let Some(mut s) = matches.value_of("dns").map(|s| s.to_string()) {
             if (s.contains(']') && !s.contains("]:")) || !s.contains(':') {
@@ -262,7 +255,7 @@ impl Settings {
         }
         if let Ok(vs) = cfg.get_array("dns") {
             for v in vs {
-                let mut s = v.to_owned().into_str().expect("Invalid DNS server!");
+                let mut s = v.into_string().expect("Invalid DNS server!");
                 if (s.contains(']') && !s.contains("]:")) || !s.contains(':') {
                     s += ":53";
                 }
@@ -274,23 +267,23 @@ impl Settings {
             }
         }
 
-        if let Some(s) = get_str(&matches, cfg, "host") {
+        if let Some(s) = get_str(matches, cfg, "host") {
             self.host = s;
         }
 
-        self.hostname = get_str(&matches, cfg, "hostname").unwrap_or_else(|| {
+        self.hostname = get_str(matches, cfg, "hostname").unwrap_or_else(|| {
             hostname::get()
                 .expect("Can't get current computer host name.")
                 .into_string()
                 .expect("Can't parse host name to String.")
         });
 
-        if let Some(s) = get_str(&matches, cfg, "time") {
+        if let Some(s) = get_str(matches, cfg, "time") {
             self.time = NaiveTime::parse_from_str(&s, "%H:%M")
                 .expect("Can't parse time String to NativeTime.");
         }
 
-        if let Some(x) = get_u64(&matches, cfg, "reconnect") {
+        if let Some(x) = get_u64(matches, cfg, "reconnect") {
             self.reconnect = x;
         }
 
