@@ -36,6 +36,7 @@ opt-level = 3
 codegen-units = 1
 lto = true
 panic = 'abort'
+strip = true
 
 [features]
 enablelog = ["log4rs"]
