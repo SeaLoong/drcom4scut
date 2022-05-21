@@ -1,7 +1,7 @@
 [package]
 name = "drcom4scut"
-version = "0.2.8"
-authors = ["SeaLoong <984391132@qq.com>"]
+version = "0.3.0"
+authors = ["SeaLoong <sealoongw@foxmail.com>"]
 edition = "2021"
 description = "A 3rd-party Drcom client for SCUT."
 license = "GPL-3.0-or-later"
@@ -15,7 +15,7 @@ crossbeam-channel = "0.5"
 encoding_rs = "0.8"
 hex = "0.4"
 hostname = "0.3"
-log = "0.4"
+log="0.4"
 md-5 = "0.10"
 rand = "0.8"
 trust-dns-resolver = "0.22"
@@ -42,6 +42,4 @@ panic = 'abort'
 strip = true
 
 [features]
-enablelog = ["log4rs"]
-
-default = ["enablelog"]
+default = ["log4rs"]
