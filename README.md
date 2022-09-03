@@ -1,6 +1,6 @@
 # drcom4scut
 
-> 当前版本  0.2.6
+> 当前版本  0.2.8
 
 + A 3rd-party DrCOM client for SCUT, written in Rust.
 + 华南理工大学第三方客户端，使用Rust语言编写。

@@ -17,12 +17,11 @@ hex = "0.4"
 hostname = "0.3"
 log = "0.4"
 md-5 = "0.10"
-pnet = "0.29"
 rand = "0.8"
-trust-dns-resolver = "0.20"
+trust-dns-resolver = "0.22"
 
 [dependencies.config]
-version = "0.12"
+version = "0.13"
 default-features = false
 features = ["yaml"]
 
@@ -30,6 +29,10 @@ features = ["yaml"]
 version = "1"
 features = ["gzip"]
 optional = true
+
+[dependencies.pnet]
+version = "0.31"
+features = ["std"]
 
 [profile.release]
 opt-level = 3

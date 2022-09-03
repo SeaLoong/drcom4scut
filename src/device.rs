@@ -23,12 +23,9 @@ fn filter_interface<P: FnMut(&NetworkInterface) -> bool>(f: P) -> Option<Network
 }
 
 fn get_first_valid_ip(e: &NetworkInterface) -> Option<&IpNetwork> {
-    for ip_net in &e.ips {
-        if ip_net.prefix() != 0 && ip_net.ip().is_global() {
-            return Some(ip_net);
-        }
-    }
-    None
+    e.ips
+        .iter()
+        .find(|&ip_net| ip_net.prefix() != 0 && ip_net.ip().is_global())
 }
 
 pub fn get_all_interfaces() -> Vec<NetworkInterface> {

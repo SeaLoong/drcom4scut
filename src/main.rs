@@ -5,9 +5,7 @@ mod settings;
 mod socket;
 mod udp;
 mod util;
-
-use std::lazy::SyncLazy;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::thread;
 use std::time::Duration;
 
@@ -133,7 +131,7 @@ fn get_matches() -> ArgMatches {
     ]).get_matches()
 }
 
-static SETTINGS: SyncLazy<Settings> = SyncLazy::new(|| {
+static SETTINGS: LazyLock<Settings> = LazyLock::new(|| {
     let matches = get_matches();
     let mut set = settings::Settings::new(&matches);
     let cfg = set.read_config().expect("Can't read config file.");

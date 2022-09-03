@@ -17,6 +17,7 @@ pub fn resolve_dns(settings: &Settings) -> Option<(IpAddr, SocketAddr)> {
             protocol: Protocol::Udp,
             tls_dns_name: None,
             trust_nx_responses: false,
+            bind_addr: None,
         });
         info!("Use DNS: {}:{}", address.ip(), address.port());
         let resolver = match Resolver::new(config, ResolverOpts::default()) {
