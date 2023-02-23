@@ -24,14 +24,20 @@
 ## 命令行参数
 
 ```bash
-USAGE:
-    drcom4scut.exe [OPTIONS] --config <config>
+Usage: drcom4scut.exe [OPTIONS]
 
-OPTIONS:
-    -c, --config <config>    Path to config file. [default: config.yml]
-    -D, --debug              Enable debug mode.
-    -h, --help               Print help information
-    -V, --version            Print version information
+Options:
+  -c, --config <config>      Path to config file. [default: config.yml]
+  -D, --debug                Enable debug mode.
+  -m, --mac <mac>            Ethernet Device MAC address.
+  -i, --ip <ip>              IP address of the selected Ethernet Device.
+  -u, --username <username>  Username to authorize.
+  -p, --password <password>  Password to authorize.
+  -H, --host <host>          Host to connect UDP server. Default value is 's.scut.edu.cn'.
+  -N, --hostname <hostname>  Default value is current computer host name.
+  -t, --time <time>          Time to reconnect automatically after you are not allowed to access Internet. Default value is 7:00.
+  -h, --help                 Print help
+  -V, --version              Print version
 ```
 
 ---

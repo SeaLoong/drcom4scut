@@ -16,14 +16,21 @@ fn get_matches() -> ArgMatches {
         .author(crate_authors!())
         .about(crate_description!())
         .args(&[
-            arg!(-D --debug "Enable debug mode."),
             arg!(-c --config <config> "Path to config file.").default_value("config.yml"),
+            arg!(-D --debug "Enable debug mode.").action(ArgAction::SetTrue),
+            arg!(-m --mac <mac> "Ethernet Device MAC address.").required(false),
+            arg!(-i --ip <ip> "IP address of the selected Ethernet Device.").required(false),
+            arg!(-u --username <username> "Username to authorize.").required(false),
+            arg!(-p --password <password> "Password to authorize.").required(false),
+            arg!(-H --host <host> "Host to connect UDP server. Default value is 's.scut.edu.cn'.").required(false),
+            arg!(-N --hostname <hostname> "Default value is current computer host name.").required(false),
+            arg!(-t --time <time> "Time to reconnect automatically after you are not allowed to access Internet. Default value is 7:00.").required(false),
         ])
         .get_matches()
 }
 
 static MATCHES: LazyLock<ArgMatches> = LazyLock::new(get_matches);
-pub static DEBUG: LazyLock<bool> = LazyLock::new(|| MATCHES.is_present("debug"));
+pub static DEBUG: LazyLock<bool> = LazyLock::new(|| MATCHES.get_flag("debug"));
 pub static SETTINGS: LazyLock<Settings> = LazyLock::new(|| Settings::parse(&MATCHES));
 
 const DEFAULT_CONFIG_FILE: &str = include_str!("default_config.yml");
@@ -198,17 +205,20 @@ fn get_map_from_map(map: &HashMap<String, Value>, k: &str) -> Option<HashMap<Str
 
 fn get_str(matches: &ArgMatches, cfg: &Config, k: &str) -> Option<String> {
     matches
-        .value_of(k)
-        .map(|s| s.to_string())
+        .try_get_one::<String>(k)
+        .ok()
+        .flatten()
+        .cloned()
         .or_else(|| cfg.get_string(k).ok())
         .filter(|s| !s.trim().is_empty())
 }
 
 fn get_u64(matches: &ArgMatches, cfg: &Config, k: &str) -> Option<u64> {
     matches
-        .value_of(k)?
-        .parse()
+        .try_get_one::<u64>(k)
         .ok()
+        .flatten()
+        .copied()
         .or_else(|| cfg.get_int(k).ok().map(|x| x as u64))
 }
 
@@ -237,7 +247,7 @@ impl Settings {
         settings.username = get_str(matches, &cfg, "username").expect("Username is REQUIRED!");
         settings.password = get_str(matches, &cfg, "password").expect("Password is REQUIRED!");
 
-        if let Some(mut s) = matches.value_of("dns").map(|s| s.to_string()) {
+        if let Some(mut s) = matches.try_get_one::<String>("dns").ok().flatten().cloned() {
             if (s.contains(']') && !s.contains("]:")) || !s.contains(':') {
                 s += ":53";
             }
@@ -402,10 +412,7 @@ impl Settings {
     }
     pub fn parse(matches: &ArgMatches) -> Settings {
         let settings = Settings::default();
-        let path = matches
-            .value_of("config")
-            .unwrap_or("config.yml")
-            .to_owned();
+        let path = matches.get_one::<String>("config").unwrap().to_owned();
         let cfg = Settings::read_config(&path);
         Settings::resolve(settings, matches, cfg)
     }
