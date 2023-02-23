@@ -9,7 +9,7 @@ readme = "README.md"
 
 [dependencies]
 bytes = "1"
-chrono = "0.4"
+chrono = "0.4.23"
 clap = { version = "3", features = ["cargo"] }
 crossbeam-channel = "0.5"
 encoding_rs = "0.8"
@@ -31,7 +31,7 @@ features = ["gzip"]
 optional = true
 
 [dependencies.pnet]
-version = "0.31"
+version = "0.33"
 features = ["std"]
 
 [profile.release]

@@ -42,7 +42,7 @@ impl Default for Settings {
             dns: Vec::new(),
             host: String::from("s.scut.edu.cn"),
             hostname: String::new(),
-            time: NaiveTime::from_hms(7, 0, 0),
+            time: NaiveTime::from_hms_opt(7, 0, 0).unwrap(),
             reconnect: 15,
             heartbeat: Heartbeat::default(),
             retry: Retry::default(),
