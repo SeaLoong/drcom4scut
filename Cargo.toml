@@ -8,7 +8,7 @@ license = "GPL-3.0-or-later"
 readme = "README.md"
 
 [dependencies]
-bytes = "1"
+bytes = "1.4.0"
 chrono = "0.4.23"
 clap = { version = "4.1.6", features = ["cargo"] }
 crossbeam-channel = "0.5"
@@ -26,7 +26,7 @@ default-features = false
 features = ["yaml"]
 
 [dependencies.log4rs]
-version = "1"
+version = "1.2.0"
 features = ["gzip"]
 optional = true
 
@@ -36,7 +36,6 @@ features = ["std"]
 
 [profile.release]
 opt-level = 3
-codegen-units = 1
 lto = true
 panic = 'abort'
 strip = true
