@@ -9,13 +9,13 @@ readme = "README.md"
 
 [dependencies]
 bytes = "1.4.0"
-chrono = "0.4.23"
-clap = { version = "4.1.6", features = ["cargo"] }
+chrono = "0.4.24"
+clap = { version = "4.2", features = ["cargo"] }
 crossbeam-channel = "0.5"
 encoding_rs = "0.8"
 hex = "0.4"
 hostname = "0.3"
-log="0.4"
+log = "0.4"
 md-5 = "0.10"
 rand = "0.8"
 trust-dns-resolver = "0.22"
