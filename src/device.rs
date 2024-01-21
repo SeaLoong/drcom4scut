@@ -80,13 +80,10 @@ impl Device {
     }
 
     pub fn new(interface: NetworkInterface) -> Result<Device> {
-        let ip = if let Some(ip) = get_first_valid_ip(&interface) {
-            ip.to_owned()
-        } else if let Some(ip) = interface.ips.get(0) {
-            ip.to_owned()
-        } else {
-            IpNetwork::new(IpAddr::from(Ipv4Addr::new(0, 0, 0, 0)), 0).unwrap()
-        };
+        let ip = get_first_valid_ip(&interface)
+            .or(interface.ips.first())
+            .cloned()
+            .unwrap_or(IpNetwork::new(IpAddr::from(Ipv4Addr::new(0, 0, 0, 0)), 0).unwrap());
         Device::with_ip_net(interface, ip)
     }
 
@@ -127,7 +124,7 @@ impl Device {
                 return Device::with_ip_net(e.to_owned(), ip_net.to_owned());
             }
         }
-        if let Some(e) = all_interfaces.get(0) {
+        if let Some(e) = all_interfaces.first() {
             Device::new(e.to_owned())
         } else {
             Err(Error::new(

@@ -1,6 +1,6 @@
 [package]
 name = "drcom4scut"
-version = "0.3.0"
+version = "0.3.1"
 authors = ["SeaLoong <sealoongw@foxmail.com>"]
 edition = "2021"
 description = "A 3rd-party Drcom client for SCUT."
@@ -18,7 +18,7 @@ hostname = "0.3"
 log = "0.4"
 md-5 = "0.10"
 rand = "0.8"
-trust-dns-resolver = "0.22"
+trust-dns-resolver = "0.23"
 
 [dependencies.config]
 version = "0.13"
