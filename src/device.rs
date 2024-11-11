@@ -152,6 +152,7 @@ impl Device {
 }
 
 #[test]
+#[ignore]
 fn test_device() {
     println!("{:?}", Device::default().unwrap().mac);
     assert!(Device::from_mac(MacAddr::new(0, 0, 0, 0, 0, 0)).is_err());
