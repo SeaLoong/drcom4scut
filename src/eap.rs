@@ -48,7 +48,7 @@ pub struct Process<'a> {
     heartbeat_handle: Option<Arc<JoinHandle<()>>>,
 }
 
-impl<'a> Process<'a> {
+impl Process<'_> {
     pub fn new(settings: &Settings, device: Arc<Device>, tx: Sender<ChannelData>) -> Process {
         Process {
             eth_header: EthernetHeader {

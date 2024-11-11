@@ -16,7 +16,7 @@ pub fn resolve_dns(settings: &Settings) -> Option<(IpAddr, SocketAddr)> {
             socket_addr: *address,
             protocol: Protocol::Udp,
             tls_dns_name: None,
-            trust_nx_responses: false,
+            trust_negative_responses: false,
             bind_addr: None,
         });
         info!("Use DNS: {}:{}", address.ip(), address.port());
