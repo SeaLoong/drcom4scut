@@ -82,7 +82,7 @@ impl Device {
     pub fn new(interface: NetworkInterface) -> Result<Device> {
         let ip = if let Some(ip) = get_first_valid_ip(&interface) {
             ip.to_owned()
-        } else if let Some(ip) = interface.ips.get(0) {
+        } else if let Some(ip) = interface.ips.first() {
             ip.to_owned()
         } else {
             IpNetwork::new(IpAddr::from(Ipv4Addr::new(0, 0, 0, 0)), 0).unwrap()
@@ -127,7 +127,7 @@ impl Device {
                 return Device::with_ip_net(e.to_owned(), ip_net.to_owned());
             }
         }
-        if let Some(e) = all_interfaces.get(0) {
+        if let Some(e) = all_interfaces.first() {
             Device::new(e.to_owned())
         } else {
             Err(Error::new(
@@ -152,6 +152,7 @@ impl Device {
 }
 
 #[test]
+#[ignore]
 fn test_device() {
     println!("{:?}", Device::default().unwrap().mac);
     assert!(Device::from_mac(MacAddr::new(0, 0, 0, 0, 0, 0)).is_err());

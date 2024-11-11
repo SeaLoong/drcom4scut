@@ -1,4 +1,4 @@
-#![feature(ip, lazy_cell, array_chunks)]
+#![feature(ip, array_chunks)]
 mod device;
 mod eap;
 mod logger;
