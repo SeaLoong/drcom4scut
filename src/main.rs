@@ -15,7 +15,7 @@ use log::{error, info};
 
 use crate::settings::Settings;
 use crate::socket::Socket;
-use crate::util::{sleep_at, ChannelData, State};
+use crate::util::{ChannelData, State, sleep_at};
 
 fn main() {
     let settings = &settings::SETTINGS;
@@ -62,7 +62,7 @@ fn main() {
     let (tx, rx) = crossbeam_channel::unbounded::<ChannelData>();
     let tx1 = tx.clone();
 
-    let eap_handle = thread::Builder::new()
+    let _eap_handle = thread::Builder::new()
         .name("EAP-Process-Generator".to_owned())
         .spawn(move || {
             let device = Arc::new(device);
@@ -210,7 +210,7 @@ fn main() {
     udp_handle
         .join()
         .expect("Fatal error! UDP Process generator thread quit!");
-    eap_handle
+    _eap_handle
         .join()
         .expect("Fatal error! EAP Process generator thread quit!");
 }

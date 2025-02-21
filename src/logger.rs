@@ -56,11 +56,11 @@ fn init_log4rs(settings: &Settings) {
         append::{
             console::ConsoleAppender,
             rolling_file::{
-                policy::compound::{
-                    roll::fixed_window::FixedWindowRoller, trigger::size::SizeTrigger,
-                    CompoundPolicy,
-                },
                 RollingFileAppender,
+                policy::compound::{
+                    CompoundPolicy, roll::fixed_window::FixedWindowRoller,
+                    trigger::size::SizeTrigger,
+                },
             },
         },
         config::{Appender, Config, Root},

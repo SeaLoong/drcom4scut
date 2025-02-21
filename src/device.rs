@@ -1,6 +1,6 @@
 use pnet::datalink::{
-    channel, interfaces, Channel, Config, DataLinkReceiver, DataLinkSender, MacAddr,
-    NetworkInterface,
+    Channel, Config, DataLinkReceiver, DataLinkSender, MacAddr, NetworkInterface, channel,
+    interfaces,
 };
 use pnet::ipnetwork::IpNetwork;
 use std::cell::RefCell;

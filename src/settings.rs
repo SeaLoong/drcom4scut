@@ -333,7 +333,9 @@ impl Settings {
                     if let Ok(v) = hex::decode(s) {
                         settings.data.response_identity.unknown = v;
                     } else {
-                        error!("Invalid config: data.response_identity.unknown! Default value instead.")
+                        error!(
+                            "Invalid config: data.response_identity.unknown! Default value instead."
+                        )
                     }
                 }
             }
@@ -342,7 +344,9 @@ impl Settings {
                     if let Ok(v) = hex::decode(s) {
                         settings.data.response_md5_challenge.unknown = v;
                     } else {
-                        error!("Invalid config: data.response_md5_challenge.unknown! Default value instead.")
+                        error!(
+                            "Invalid config: data.response_md5_challenge.unknown! Default value instead."
+                        )
                     }
                 }
             }
