@@ -106,6 +106,8 @@ cargo build --release
 + 由于使用了 [**libpnet**](https://crates.io/crates/pnet) ，在Windows下需要安装 *WinPcap* 或 *pcap* 才能进行编译，详见[**libpnet**](https://crates.io/crates/pnet)。
 + 目前在 Windows/Ubuntu(感谢hyh) 下编译通过，其余环境暂未测试。
 
+### 自动构建
++ 已经为Ubuntu和Windows自动构建了最新版本的drcom4scut，如有需要请从GitHub Action下载。如果文件过期可以自己fork后构建。
 ### OpenWRT
 
 + 由于并没有了解这方面，待补充。

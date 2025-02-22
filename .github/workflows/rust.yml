@@ -1,28 +1,48 @@
 name: Rust
-
-on:
-  push:
-    branches: [ "master", "dev" ]
-  pull_request:
-    branches: [ "master", "dev" ]
-
+on: [push, pull_request]
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
   build:
-
-    runs-on: ubuntu-latest
+    env:
+      NPCAP_SDK_URL: "https://npcap.com/dist/npcap-sdk-1.15.zip"
+      bin_dir: ./tmp_bin
     strategy:
       matrix:
-        toolchain:
-          - nightly
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
-    - uses: actions/checkout@v4
-    - run: rustup update ${{ matrix.toolchain }} && rustup default ${{ matrix.toolchain }}
-    - name: Build
-      run: cargo build --verbose
-    - name: Build for release
-      run: cargo build --release --verbose
-    - name: Run tests
-      run: cargo test --verbose
+      - uses: actions/checkout@v4
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@nightly
+      - name: Cache Windows dependencies
+        if: matrix.os == 'windows-latest'
+        id: cache-windows
+        uses: actions/cache@v4
+        with:
+          key: ${{ env.NPCAP_SDK_URL }}
+          path: .\Packet.lib
+      - name: Install Windows dependencies
+        if: matrix.os == 'windows-latest' && steps.cache-windows.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          $sdkPath = ".\tmp"
+          mkdir $sdkPath
+          Invoke-WebRequest -Uri $env:NPCAP_SDK_URL -OutFile "$sdkPath\npcap-sdk.zip"
+          Expand-Archive -Path "$sdkPath\npcap-sdk.zip" -DestinationPath $sdkPath
+          Copy-Item -Path "$sdkPath\Lib\x64\Packet.lib" -Destination .
+      - name: Build
+        run: cargo build --verbose
+      - name: Build for release
+        run: cargo build --release --verbose
+      - name: Test
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo test --verbose
+      - name: Cargo Install
+        run: cargo install --locked --path . --target-dir target --root ${{ env.bin_dir }}
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: drcom4scut-${{ matrix.os }}
+          path: ${{ env.bin_dir }}/bin
