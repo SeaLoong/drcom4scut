@@ -7,17 +7,17 @@ use std::time::Duration;
 
 use bytes::BytesMut;
 use chrono::Local;
-use crossbeam_channel::{unbounded, Receiver, Sender, TryRecvError};
+use crossbeam_channel::{Receiver, Sender, TryRecvError, unbounded};
 use log::{debug, error, info};
 use pnet::datalink::MacAddr;
 
 use crate::settings::Settings;
 use crate::socket::Socket;
 use crate::udp::packet::{
-    decrypt_info, Alive, HeaderType, HeartbeatType, MiscAlive, MiscHeartbeat1, MiscHeartbeat3,
-    MiscInfo,
+    Alive, HeaderType, HeartbeatType, MiscAlive, MiscHeartbeat1, MiscHeartbeat3, MiscInfo,
+    decrypt_info,
 };
-use crate::util::{self, random_vec, sleep, ChannelData, State};
+use crate::util::{self, ChannelData, State, random_vec, sleep};
 
 mod packet;
 
@@ -158,27 +158,30 @@ impl<'a> Process<'a> {
         let resender_handle = Arc::new(
             thread::Builder::new()
                 .name("UDP-ReSender".to_owned())
-                .spawn(move || loop {
-                    if quit.load(Ordering::Relaxed) {
-                        debug!("UDP-Resender thread quit!");
-                        return;
-                    }
-                    if stop.load(Ordering::Relaxed) {
-                        thread::park();
-                    }
-                    while cancel_resend.load(Ordering::Acquire) {
-                        thread::park();
-                    }
-                    let wait_ts = send_ts.load(Ordering::Acquire) - Local::now().timestamp_millis()
-                        + (interval as i64);
-                    if wait_ts > 0 {
-                        thread::sleep(Duration::from_millis(wait_ts as u64));
-                    } else if wait_ts > -interval as i64 {
-                        debug!("Resending...");
-                        cancel_resend.store(true, Ordering::Release);
-                        if tx.send((Vec::new(), true)).is_err() {
-                            error!("Unexpected! Send channel is disconnected!");
-                            quit.store(true, Ordering::Release);
+                .spawn(move || {
+                    loop {
+                        if quit.load(Ordering::Relaxed) {
+                            debug!("UDP-Resender thread quit!");
+                            return;
+                        }
+                        if stop.load(Ordering::Relaxed) {
+                            thread::park();
+                        }
+                        while cancel_resend.load(Ordering::Acquire) {
+                            thread::park();
+                        }
+                        let wait_ts = send_ts.load(Ordering::Acquire)
+                            - Local::now().timestamp_millis()
+                            + (interval as i64);
+                        if wait_ts > 0 {
+                            thread::sleep(Duration::from_millis(wait_ts as u64));
+                        } else if wait_ts > -interval as i64 {
+                            debug!("Resending...");
+                            cancel_resend.store(true, Ordering::Release);
+                            if tx.send((Vec::new(), true)).is_err() {
+                                error!("Unexpected! Send channel is disconnected!");
+                                quit.store(true, Ordering::Release);
+                            }
                         }
                     }
                 })
@@ -294,47 +297,49 @@ impl<'a> Process<'a> {
         self.receiving_eap_handle = Some(Arc::new(
             thread::Builder::new()
                 .name("EAPtoUDP".to_owned())
-                .spawn(move || loop {
-                    if quit.load(Ordering::Relaxed) {
-                        info!("Stop receiving message from EAP.");
-                        debug!("EAPtoUDP thread quit!");
-                        return;
-                    }
-                    if stop.load(Ordering::Relaxed) {
-                        thread.unpark();
-                        thread::park();
-                    }
-                    match rx.recv() {
-                        Ok(x) => match x.state {
-                            State::Success => {
-                                info!("Receive SUCCESS from EAP.");
-                                loop {
-                                    if let Ok(mut r) = data.try_write() {
-                                        r.cks_md5 = x.data;
-                                        info!("cks_md5(md5): {}", hex::encode(&r.cks_md5));
-                                        break;
+                .spawn(move || {
+                    loop {
+                        if quit.load(Ordering::Relaxed) {
+                            info!("Stop receiving message from EAP.");
+                            debug!("EAPtoUDP thread quit!");
+                            return;
+                        }
+                        if stop.load(Ordering::Relaxed) {
+                            thread.unpark();
+                            thread::park();
+                        }
+                        match rx.recv() {
+                            Ok(x) => match x.state {
+                                State::Success => {
+                                    info!("Receive SUCCESS from EAP.");
+                                    loop {
+                                        if let Ok(mut r) = data.try_write() {
+                                            r.cks_md5 = x.data;
+                                            info!("cks_md5(md5): {}", hex::encode(&r.cks_md5));
+                                            break;
+                                        }
+                                        util::sleep();
                                     }
-                                    util::sleep();
+                                    thread.unpark();
                                 }
-                                thread.unpark();
-                            }
-                            State::Stop => {
-                                info!("Receive STOP from EAP.");
-                                stop.store(true, Ordering::Release);
-                            }
-                            State::Sleep => {
-                                info!("Receive SLEEP from EAP.");
-                                sleep.store(true, Ordering::Release);
-                                stop.store(true, Ordering::Release);
-                            }
-                            State::Quit => {
-                                info!("Receive QUIT from EAP.");
+                                State::Stop => {
+                                    info!("Receive STOP from EAP.");
+                                    stop.store(true, Ordering::Release);
+                                }
+                                State::Sleep => {
+                                    info!("Receive SLEEP from EAP.");
+                                    sleep.store(true, Ordering::Release);
+                                    stop.store(true, Ordering::Release);
+                                }
+                                State::Quit => {
+                                    info!("Receive QUIT from EAP.");
+                                    quit.store(true, Ordering::Release);
+                                }
+                            },
+                            Err(_) => {
+                                error!("Unexpected! EAPtoUDP channel is closed.");
                                 quit.store(true, Ordering::Release);
                             }
-                        },
-                        Err(_) => {
-                            error!("Unexpected! EAPtoUDP channel is closed.");
-                            quit.store(true, Ordering::Release);
                         }
                     }
                 })

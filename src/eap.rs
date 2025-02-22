@@ -1,13 +1,13 @@
 use std::cmp::min;
 use std::str::FromStr;
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU8, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU8, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use chrono::Local;
-use crossbeam_channel::{unbounded, Receiver, Sender, TryRecvError};
+use crossbeam_channel::{Receiver, Sender, TryRecvError, unbounded};
 use log::{debug, error, info, warn};
 use md5::Digest;
 use pnet::datalink::MacAddr;
@@ -15,7 +15,7 @@ use pnet::datalink::MacAddr;
 use crate::device::Device;
 use crate::eap::packet::*;
 use crate::settings::Settings;
-use crate::util::{ip_to_vec, sleep, ChannelData, State};
+use crate::util::{ChannelData, State, ip_to_vec, sleep};
 
 mod packet;
 
@@ -145,27 +145,30 @@ impl Process<'_> {
         let resender_handle = Arc::new(
             thread::Builder::new()
                 .name("EAP-Resender".to_owned())
-                .spawn(move || loop {
-                    if quit.load(Ordering::Relaxed) {
-                        debug!("EAP-Resender thread quit!");
-                        return;
-                    }
-                    if stop.load(Ordering::Relaxed) {
-                        thread::park();
-                    }
-                    while cancel_resend.load(Ordering::Acquire) {
-                        thread::park();
-                    }
-                    let wait_ts = send_ts.load(Ordering::Acquire) - Local::now().timestamp_millis()
-                        + (interval as i64);
-                    if wait_ts > 0 {
-                        thread::sleep(Duration::from_millis(wait_ts as u64));
-                    } else if wait_ts > -interval as i64 {
-                        debug!("Resending...");
-                        cancel_resend.store(true, Ordering::Release);
-                        if tx.send((Vec::new(), true)).is_err() {
-                            error!("Unexpected! Send channel is disconnected!");
-                            quit.store(true, Ordering::Release);
+                .spawn(move || {
+                    loop {
+                        if quit.load(Ordering::Relaxed) {
+                            debug!("EAP-Resender thread quit!");
+                            return;
+                        }
+                        if stop.load(Ordering::Relaxed) {
+                            thread::park();
+                        }
+                        while cancel_resend.load(Ordering::Acquire) {
+                            thread::park();
+                        }
+                        let wait_ts = send_ts.load(Ordering::Acquire)
+                            - Local::now().timestamp_millis()
+                            + (interval as i64);
+                        if wait_ts > 0 {
+                            thread::sleep(Duration::from_millis(wait_ts as u64));
+                        } else if wait_ts > -interval as i64 {
+                            debug!("Resending...");
+                            cancel_resend.store(true, Ordering::Release);
+                            if tx.send((Vec::new(), true)).is_err() {
+                                error!("Unexpected! Send channel is disconnected!");
+                                quit.store(true, Ordering::Release);
+                            }
                         }
                     }
                 })
@@ -378,11 +381,7 @@ impl Process<'_> {
                 ),
             }
         }
-        if ret {
-            State::Sleep
-        } else {
-            State::Stop
-        }
+        if ret { State::Sleep } else { State::Stop }
     }
 
     #[inline]

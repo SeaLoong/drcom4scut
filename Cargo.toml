@@ -1,27 +1,27 @@
 [package]
 name = "drcom4scut"
-version = "0.3.0"
+version = "0.3.1"
 authors = ["SeaLoong <sealoongw@foxmail.com>"]
-edition = "2021"
+edition = "2024"
 description = "A 3rd-party Drcom client for SCUT."
 license = "GPL-3.0-or-later"
 readme = "README.md"
 
 [dependencies]
-bytes = "1.8.0"
-chrono = "0.4.38"
-clap = { version = "4.5.20", features = ["cargo"] }
-crossbeam-channel = "0.5.13"
+bytes = "1.10.0"
+chrono = "0.4.39"
+clap = { version = "4.5.30", features = ["cargo"] }
+crossbeam-channel = "0.5.14"
 encoding_rs = "0.8.35"
 hex = "0.4.3"
 hostname = "0.4.0"
-log = "0.4.22"
+log = "0.4.26"
 md-5 = "0.10.6"
-rand = "0.8.5"
+rand = "0.9.0"
 trust-dns-resolver = "0.23.2"
 
 [dependencies.config]
-version = "0.14.1"
+version = "0.15.8"
 default-features = false
 features = ["yaml"]
 
