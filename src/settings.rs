@@ -308,46 +308,44 @@ impl Settings {
         }
 
         #[cfg(feature = "log4rs")]
-        if settings.log.level_filter != log::LevelFilter::Off {
-            if let Ok(map) = cfg.get_table("log") {
-                if let Some(x) = get_bool_from_map(&map, "enable_console") {
-                    settings.log.enable_console = x;
-                }
-                if let Some(x) = get_bool_from_map(&map, "enable_file") {
-                    settings.log.enable_file = x;
-                }
-                if let Some(x) = get_str_from_map(&map, "file_directory") {
-                    settings.log.file_directory = x;
-                }
-                if let Some(Ok(level_filter)) = get_str_from_map(&map, "level")
-                    .map(|x| log::LevelFilter::from_str(x.to_ascii_uppercase().as_str()))
-                {
-                    settings.log.level_filter = level_filter;
-                }
+        if settings.log.level_filter != log::LevelFilter::Off
+            && let Ok(map) = cfg.get_table("log")
+        {
+            if let Some(x) = get_bool_from_map(&map, "enable_console") {
+                settings.log.enable_console = x;
+            }
+            if let Some(x) = get_bool_from_map(&map, "enable_file") {
+                settings.log.enable_file = x;
+            }
+            if let Some(x) = get_str_from_map(&map, "file_directory") {
+                settings.log.file_directory = x;
+            }
+            if let Some(Ok(level_filter)) = get_str_from_map(&map, "level")
+                .map(|x| log::LevelFilter::from_str(x.to_ascii_uppercase().as_str()))
+            {
+                settings.log.level_filter = level_filter;
             }
         }
 
         if let Ok(data) = cfg.get_table("data") {
-            if let Some(map) = get_map_from_map(&data, "response_identity") {
-                if let Some(s) = get_str_from_map(&map, "unknown") {
-                    if let Ok(v) = hex::decode(s) {
-                        settings.data.response_identity.unknown = v;
-                    } else {
-                        error!(
-                            "Invalid config: data.response_identity.unknown! Default value instead."
-                        )
-                    }
+            if let Some(map) = get_map_from_map(&data, "response_identity")
+                && let Some(s) = get_str_from_map(&map, "unknown")
+            {
+                if let Ok(v) = hex::decode(s) {
+                    settings.data.response_identity.unknown = v;
+                } else {
+                    error!("Invalid config: data.response_identity.unknown! Default value instead.")
                 }
             }
-            if let Some(map) = get_map_from_map(&data, "response_md5_challenge") {
-                if let Some(s) = get_str_from_map(&map, "unknown") {
-                    if let Ok(v) = hex::decode(s) {
-                        settings.data.response_md5_challenge.unknown = v;
-                    } else {
-                        error!(
-                            "Invalid config: data.response_md5_challenge.unknown! Default value instead."
-                        )
-                    }
+            if let Some(map) = get_map_from_map(&data, "response_md5_challenge")
+                && let Some(s) = get_str_from_map(&map, "unknown")
+            {
+                if let Ok(v) = hex::decode(s) {
+                    settings.data.response_md5_challenge.unknown = v;
+                } else {
+                    error!(
+                        "Invalid config: data.response_md5_challenge.unknown! Default value instead."
+                    )
                 }
             }
             if let Some(map) = get_map_from_map(&data, "misc_info") {

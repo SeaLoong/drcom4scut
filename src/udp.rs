@@ -125,7 +125,7 @@ impl<'a> Process<'a> {
                                 }
                             }
                             Err(e) => {
-                                error!("Receive error: {}", e);
+                                error!("Receive error: {e}");
                                 cnt += 1;
                                 if cnt > count {
                                     quit.store(true, Ordering::Release);
@@ -241,7 +241,7 @@ impl<'a> Process<'a> {
                                     break;
                                 }
                                 Err(e) => {
-                                    error!("Send error: {}", e);
+                                    error!("Send error: {e}");
                                     cnt += 1;
                                     if cnt > count {
                                         quit.store(true, Ordering::Release);
@@ -445,7 +445,7 @@ impl<'a> Process<'a> {
                 }
                 HeaderType::MessageServerInformation => {
                     let (s, _) = encoding_rs::GB18030.decode_without_bom_handling(&raw[4..]);
-                    info!("Server Information: {}", s);
+                    info!("Server Information: {s}");
                 }
             }
         }

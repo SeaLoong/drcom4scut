@@ -49,7 +49,7 @@ pub struct Process<'a> {
 }
 
 impl Process<'_> {
-    pub fn new(settings: &Settings, device: Arc<Device>, tx: Sender<ChannelData>) -> Process {
+    pub fn new(settings: &Settings, device: Arc<Device>, tx: Sender<ChannelData>) -> Process<'_> {
         Process {
             eth_header: EthernetHeader {
                 destination: MULTICAST_MAC,
@@ -112,7 +112,7 @@ impl Process<'_> {
                                 }
                             }
                             Err(e) => {
-                                error!("Receive error: {}", e);
+                                error!("Receive error: {e}");
                                 cnt += 1;
                                 if cnt > count {
                                     quit.store(true, Ordering::Release);
@@ -228,7 +228,7 @@ impl Process<'_> {
                                     break;
                                 }
                                 Err(e) => {
-                                    error!("Send error: {}", e);
+                                    error!("Send error: {e}");
                                     cnt += 1;
                                     if cnt > count {
                                         quit.store(true, Ordering::Release);
@@ -291,7 +291,7 @@ impl Process<'_> {
                     state: State::Quit,
                     data: Vec::new(),
                 }) {
-                    error!("Can't send STOP message to UDP receiver. {}", e);
+                    error!("Can't send STOP message to UDP receiver. {e}");
                 }
                 return State::Quit;
             }
@@ -341,16 +341,13 @@ impl Process<'_> {
                                 }
                                 EAPType::Notification => {
                                     ret = self.on_request_notification(&eap_header, bytes); // sleep if true
-                                    if ret {
-                                        if let Err(e) = self.tx.try_send(ChannelData {
+                                    if ret
+                                        && let Err(e) = self.tx.try_send(ChannelData {
                                             state: State::Sleep,
                                             data: Vec::new(),
-                                        }) {
-                                            error!(
-                                                "Can't send SLEEP message to UDP receiver. {}",
-                                                e
-                                            );
-                                        }
+                                        })
+                                    {
+                                        error!("Can't send SLEEP message to UDP receiver. {e}");
                                     }
                                     self.stop.store(true, Ordering::Release);
                                 }
@@ -417,7 +414,7 @@ impl Process<'_> {
             self.cancel_resend();
             match String::from_utf8(bytes.split_to((eap_header.length - 5) as usize).to_vec()) {
                 Ok(s) => {
-                    error!("{}", s);
+                    error!("{s}");
                     if let Some(s) = s.strip_prefix("userid error") {
                         if let Ok(x) = i32::from_str(s) {
                             match x {
@@ -479,7 +476,7 @@ impl Process<'_> {
             state: State::Success,
             data: self.data.md5.clone(),
         }) {
-            error!("Can't send SUCCESS message to UDP receiver. {}", e);
+            error!("Can't send SUCCESS message to UDP receiver. {e}");
         }
         self.start_heartbeat_thread();
     }

@@ -31,7 +31,7 @@ fn main() {
     info!("Username: {}", settings.username);
     info!("Password: {}", settings.password);
     for dns in &settings.dns {
-        info!("DNS Server: {}", dns);
+        info!("DNS Server: {dns}");
     }
     info!("Host: {}", settings.host);
     info!("Hostname: {}", settings.hostname);
@@ -156,7 +156,7 @@ fn main() {
                             let socket = Socket::new(match socket::socket_bind(udp_ip) {
                                 Some(socket) => socket,
                                 None => {
-                                    error!("UDP: Can't create socket and connect to '{}'.", udp_ip);
+                                    error!("UDP: Can't create socket and connect to '{udp_ip}'.");
                                     return;
                                 }
                             });

@@ -54,7 +54,7 @@ impl Device {
             Some(interface) => Device::new(interface),
             None => Err(Error::new(
                 ErrorKind::NotFound,
-                format!("Can't get interface which MAC address is {}.", mac),
+                format!("Can't get interface which MAC address is {mac}."),
             )),
         }
     }
@@ -74,7 +74,7 @@ impl Device {
             Some(interface) => Device::with_ip_net(interface, ip_net),
             None => Err(Error::new(
                 ErrorKind::NotFound,
-                format!("Can't get interface which IP address is {}.", ip),
+                format!("Can't get interface which IP address is {ip}."),
             )),
         }
     }
@@ -109,13 +109,10 @@ impl Device {
                 ip_net,
                 interface,
             }),
-            Ok(_) => Err(Error::new(
-                ErrorKind::Other,
-                format!(
-                    "Created an unknown channel type on Device {}.",
-                    interface.name
-                ),
-            )),
+            Ok(_) => Err(Error::other(format!(
+                "Created an unknown channel type on Device {}.",
+                interface.name
+            ))),
             Err(err) => Err(err),
         }
     }
