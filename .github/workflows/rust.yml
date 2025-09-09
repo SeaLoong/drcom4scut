@@ -2,20 +2,28 @@ name: Rust
 on: [push, pull_request]
 env:
   CARGO_TERM_COLOR: always
-
+  NPCAP_SDK_URL: "https://npcap.com/dist/npcap-sdk-1.15.zip"
+  bin_dir: ./tmp_bin
 jobs:
   build:
-    env:
-      NPCAP_SDK_URL: "https://npcap.com/dist/npcap-sdk-1.15.zip"
-      bin_dir: ./tmp_bin
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest]
+        target:
+          - x86_64-unknown-linux-gnu
+          - x86_64-unknown-linux-musl
+          - aarch64-unknown-linux-musl
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@nightly
+        with:
+          targets: ${{ matrix.target }}
       - name: Cache Windows dependencies
         if: matrix.os == 'windows-latest'
         id: cache-windows
@@ -44,5 +52,5 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: drcom4scut-${{ matrix.os }}
+          name: drcom4scut-${{ matrix.target }}
           path: ${{ env.bin_dir }}/bin
