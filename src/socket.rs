@@ -143,7 +143,12 @@ impl RuntimeProvider for InterfaceRuntime {
     }
 }
 
-#[cfg(any(windows, target_os = "linux", target_os = "android"))]
+#[cfg(any(
+    windows,
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos"
+))]
 fn selected_interface(
     source: IpAddr,
     interfaces: &[pnet::datalink::NetworkInterface],
@@ -178,7 +183,31 @@ fn bind_selected_interface(socket: &UdpSocket, source: IpAddr) -> io::Result<()>
     socket2::SockRef::from(socket).bind_device(Some(interface.name.as_bytes()))
 }
 
-#[cfg(not(any(windows, target_os = "linux", target_os = "android")))]
+#[cfg(target_os = "macos")]
+fn bind_selected_interface(socket: &UdpSocket, source: IpAddr) -> io::Result<()> {
+    if source.is_unspecified() {
+        return Ok(());
+    }
+    let interfaces = crate::device::get_all_interfaces();
+    let interface = selected_interface(source, &interfaces)?;
+    let index = std::num::NonZeroU32::new(interface.index).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::AddrNotAvailable,
+            "interface index is unavailable",
+        )
+    })?;
+    // Binding the source IPv4 alone does not constrain Darwin's egress route.
+    // IP_BOUND_IF keeps campus DNS and DrCOM traffic on the selected Ethernet
+    // link even when Wi-Fi or a VPN supplies the system's preferred route.
+    socket2::SockRef::from(socket).bind_device_by_index_v4(Some(index))
+}
+
+#[cfg(not(any(
+    windows,
+    target_os = "linux",
+    target_os = "android",
+    target_os = "macos"
+)))]
 fn bind_selected_interface(_socket: &UdpSocket, _source: IpAddr) -> io::Result<()> {
     Ok(())
 }
@@ -398,7 +427,12 @@ mod tests {
         );
     }
 
-    #[cfg(any(windows, target_os = "linux", target_os = "android"))]
+    #[cfg(any(
+        windows,
+        target_os = "linux",
+        target_os = "android",
+        target_os = "macos"
+    ))]
     #[test]
     fn physical_source_selection_rejects_missing_and_ambiguous_adapters() {
         use pnet::datalink::NetworkInterface;
@@ -447,7 +481,7 @@ mod tests {
     async fn dns_packets_use_selected_physical_source_address() {
         let server = UdpSocket::bind("127.0.0.1:0").await.unwrap();
         let address = server.local_addr().unwrap();
-        let source: IpAddr = "127.0.0.2".parse().unwrap();
+        let source = loopback_source();
         let task = tokio::spawn(async move {
             let mut bytes = [0; 2048];
             let (size, peer) = server.recv_from(&mut bytes).await.unwrap();
@@ -487,7 +521,7 @@ mod tests {
     #[tokio::test]
     async fn udp_packets_use_selected_source_and_configured_server_port() {
         let server = UdpSocket::bind("127.0.0.1:0").await.unwrap();
-        let source: IpAddr = "127.0.0.2".parse().unwrap();
+        let source = loopback_source();
         let socket = socket_bind_from(
             server.local_addr().unwrap().ip(),
             source,
@@ -497,6 +531,18 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(socket.local_addr().unwrap().ip(), source);
+        #[cfg(target_os = "macos")]
+        {
+            // Exercise the real Darwin socket option as an ordinary user, rather
+            // than asserting only the source address that bind() already sets.
+            let interfaces = crate::device::get_all_interfaces();
+            let expected = selected_interface(source, &interfaces).unwrap().index;
+            let actual = socket2::SockRef::from(&socket)
+                .device_index_v4()
+                .unwrap()
+                .map(std::num::NonZeroU32::get);
+            assert_eq!(actual, Some(expected));
+        }
         socket.send(b"bound-source").await.unwrap();
         let mut bytes = [0; 32];
         let (size, peer) = timeout(Duration::from_secs(1), server.recv_from(&mut bytes))
@@ -505,6 +551,16 @@ mod tests {
             .unwrap();
         assert_eq!(peer.ip(), source);
         assert_eq!(&bytes[..size], b"bound-source");
+    }
+
+    #[cfg(not(windows))]
+    fn loopback_source() -> IpAddr {
+        // Linux assigns the whole 127/8 range to loopback. Darwin requires an
+        // explicit alias for 127.0.0.2, so use its default assigned address there.
+        #[cfg(target_os = "macos")]
+        return Ipv4Addr::LOCALHOST.into();
+        #[cfg(not(target_os = "macos"))]
+        "127.0.0.2".parse().unwrap()
     }
 
     #[tokio::test]

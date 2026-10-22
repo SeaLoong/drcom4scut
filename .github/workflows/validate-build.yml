@@ -37,9 +37,7 @@ jobs:
           matrix = []
           for platform in platforms:
               target = platform['target']
-              runner = 'qemu-arm' if target.startswith(('armv5te-', 'armv7-')) else ('qemu-riscv64' if target.startswith('riscv64gc-') else '')
-              os = 'windows-latest' if platform['format'] == 'pe' else ('ubuntu-24.04-arm' if target.startswith('aarch64-') else 'ubuntu-24.04')
-              matrix.append({'os': os, 'target': target, 'runner': runner, 'static': platform['openwrt'], 'features': ','.join(platform.get('features', []))})
+              matrix.append({'os': platform['runner'], 'target': target, 'emulator': platform.get('emulator', ''), 'static': platform['openwrt'], 'features': ','.join(platform.get('features', [])), 'npcap_arch': platform.get('npcap_arch', '')})
           print('matrix=' + json.dumps({'include': matrix}))
           PY
 
@@ -52,6 +50,9 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.14'
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           targets: ${{ matrix.target }}
@@ -59,17 +60,19 @@ jobs:
         if: matrix.static
         run: echo 'RUSTFLAGS=-C linker=rust-lld -C target-feature=+crt-static' >> "$GITHUB_ENV"
       - name: Install user-mode emulator for cross-target tests
-        if: matrix.runner != ''
+        if: matrix.emulator != ''
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y qemu-user
           # Foreign-CPU suites run serially; each protocol test still drives concurrent async tasks.
           echo 'RUST_TEST_THREADS=1' >> "$GITHUB_ENV"
-          echo "DRCOM_TEST_RUNNER=${{ matrix.runner }}" >> "$GITHUB_ENV"
-          echo "CARGO_TARGET_$(echo '${{ matrix.target }}' | tr '[:lower:]-' '[:upper:]_')_RUNNER=${{ matrix.runner }}" >> "$GITHUB_ENV"
+          echo "DRCOM_TEST_RUNNER=${{ matrix.emulator }}" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_$(echo '${{ matrix.target }}' | tr '[:lower:]-' '[:upper:]_')_RUNNER=${{ matrix.emulator }}" >> "$GITHUB_ENV"
       - name: Install Windows packet capture SDK
         if: runner.os == 'Windows'
         uses: ./.github/actions/setup-npcap
+        with:
+          architecture: ${{ matrix.npcap_arch }}
       - name: Test Windows service ACL policy without administrator rights
         if: runner.os == 'Windows'
         run: powershell -NoProfile -NonInteractive -File scripts/test-service-acl.ps1
@@ -93,7 +96,7 @@ jobs:
         shell: bash
         env:
           TARGET: ${{ matrix.target }}
-          EMULATOR: ${{ matrix.runner }}
+          EMULATOR: ${{ matrix.emulator }}
         run: python .github/scripts/package_release.py "$TARGET" --runner "$EMULATOR"
       - name: Upload package
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

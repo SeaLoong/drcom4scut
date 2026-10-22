@@ -131,12 +131,17 @@ fn dispatch() -> Result<(), String> {
     runtime.block_on(async move {
         let (stop, receiver) = watch::channel(false);
         let control_name = settings.control_pipe.clone();
+        let control_socket = settings.control_socket.clone();
         let client = client::run(settings, receiver);
         tokio::pin!(client);
         tokio::select! {
             result = &mut client => result,
             signal = async {
-                tokio::select! { result = shutdown_signal() => result, result = drcom4scut::control::wait(control_name.as_deref()) => result }
+                tokio::select! {
+                    result = shutdown_signal() => result,
+                    result = drcom4scut::control::wait(control_name.as_deref()) => result,
+                    result = drcom4scut::control::wait_socket(control_socket.as_deref()) => result,
+                }
             } => {
                 stop.send_replace(true);
                 let result = tokio::time::timeout(std::time::Duration::from_secs(3), &mut client).await

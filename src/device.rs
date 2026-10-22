@@ -513,8 +513,9 @@ type EthernetChannel = (Box<dyn DataLinkSender>, Box<dyn DataLinkReceiver>);
 
 #[cfg(not(windows))]
 fn open_channel(interface: &NetworkInterface) -> Result<EthernetChannel> {
-    // Unix pnet backends honor read_timeout. Keep blocking packet I/O off the
-    // async executor and bound the lifetime of each read on quiet interfaces.
+    // Linux uses a bounded raw-socket read; macOS pnet enables immediate,
+    // nonblocking BPF capture and waits through pselect with this timeout. Keep
+    // both backends off the async executor and bound reads on quiet interfaces.
     let config = Config {
         read_timeout: Some(Duration::from_millis(200)),
         write_timeout: Some(Duration::from_millis(200)),

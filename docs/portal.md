@@ -46,7 +46,7 @@ portal:
 
 如果在线列表明确显示本机属于另一账号，客户端会提示，既不把它当作所选账号登录成功，也不自动踢掉该账号。换号时先显式执行下方注销命令，再用新的账号运行。学校没有返回账号归属时，在线状态仅确认当前设备的网络会话，不能证明某个特定账号的归属。
 
-按 Ctrl-C 停止；Linux SIGTERM 也会触发注销。需要单独退出现有门户会话时：
+按 Ctrl-C 停止；Linux、macOS 的 SIGTERM 也会触发注销。需要单独退出现有门户会话时：
 
 ```sh
 ./drcom4scut --config portal.yml --logoff
@@ -58,7 +58,7 @@ portal:
 
 部分学校入口使用明文 HTTP。只有确认学校提供该入口时，才把地址改为对应 HTTP URL，并显式设置 `portal.allow_http: true` 或添加 `--allow-insecure-portal`。例如 API 可为学校确认的同主机 `http://...:801`；不要仅因为 HTTPS 失败就猜测或降级。
 
-HTTP 登录会在网络上传输认证所需的账号密码；本地密码文件权限不能加密这段传输。HTTPS 构建保留证书校验，`--require-https-portal` 可覆盖配置中的 HTTP 许可。GNU/Windows 默认包支持 HTTPS；预编译 OpenWrt 静态包只支持显式允许的 HTTP 门户，遇到 HTTPS 会报不支持 TLS。
+HTTP 登录会在网络上传输认证所需的账号密码；本地密码文件权限不能加密这段传输。HTTPS 构建保留证书校验，`--require-https-portal` 可覆盖配置中的 HTTP 许可。GNU Linux、macOS、Windows 默认包支持 HTTPS；预编译 OpenWrt 静态包只支持显式允许的 HTTP 门户，遇到 HTTPS 会报不支持 TLS。
 
 ## 常见问题
 

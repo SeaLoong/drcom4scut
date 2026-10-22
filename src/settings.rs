@@ -34,7 +34,8 @@ pub fn command() -> clap::Command {
             arg!(--"no-log" "Disable file logs.").action(ArgAction::SetTrue),
             arg!(--once "Exit successfully after the first complete authentication/heartbeat.").action(ArgAction::SetTrue),
             arg!(--"status-file" <PATH> "Write sanitized connection status as atomic JSON."),
-            arg!(--"control-pipe" <NAME> "Private GUI lifecycle control channel."),
+            arg!(--"control-pipe" <NAME> "Private Windows GUI lifecycle control pipe.").conflicts_with("control-socket"),
+            arg!(--"control-socket" <PATH> "Private Unix GUI lifecycle control socket."),
             arg!(--"service-run" "Internal Windows service host.").action(ArgAction::SetTrue).hide(true),
             arg!(--"service-install" "Install Windows SCM service using an admin-secured --config path.").action(ArgAction::SetTrue),
             arg!(--"service-start" "Start the Windows service.").action(ArgAction::SetTrue),
@@ -91,6 +92,7 @@ pub enum Mode {
 #[derive(Hash, PartialEq, Eq, Clone)]
 pub struct Settings {
     pub control_pipe: Option<String>,
+    pub control_socket: Option<PathBuf>,
     pub hooks: crate::hooks::Hooks,
     pub mode: Mode,
     pub portal_base: String,
@@ -134,6 +136,7 @@ impl Default for Settings {
     fn default() -> Self {
         Settings {
             control_pipe: None,
+            control_socket: None,
             hooks: crate::hooks::Hooks::default(),
             mode: Mode::Eap,
             portal_base: "https://s.scut.edu.cn".into(),
@@ -423,6 +426,12 @@ impl Settings {
         settings.control_pipe = matches.get_one::<String>("control-pipe").cloned();
         if let Some(name) = &settings.control_pipe {
             crate::control::validate_name(name)?;
+        }
+        settings.control_socket = matches
+            .get_one::<String>("control-socket")
+            .map(PathBuf::from);
+        if let Some(path) = &settings.control_socket {
+            crate::control::validate_socket_path(path)?;
         }
         settings.hooks.online = command_array(cfg, "hooks.online")?;
         settings.hooks.offline = command_array(cfg, "hooks.offline")?;

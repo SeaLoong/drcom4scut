@@ -4,7 +4,8 @@
     "machine": 62,
     "bits": 64,
     "format": "elf",
-    "openwrt": false
+    "openwrt": false,
+    "runner": "ubuntu-24.04"
   },
   {
     "target": "x86_64-unknown-linux-musl",
@@ -15,7 +16,8 @@
     "features": [
       "log4rs",
       "portal"
-    ]
+    ],
+    "runner": "ubuntu-24.04"
   },
   {
     "target": "aarch64-unknown-linux-musl",
@@ -26,7 +28,8 @@
     "features": [
       "log4rs",
       "portal"
-    ]
+    ],
+    "runner": "ubuntu-24.04-arm"
   },
   {
     "target": "armv5te-unknown-linux-musleabi",
@@ -38,7 +41,9 @@
     "features": [
       "log4rs",
       "portal"
-    ]
+    ],
+    "runner": "ubuntu-24.04",
+    "emulator": "qemu-arm"
   },
   {
     "target": "armv7-unknown-linux-musleabi",
@@ -50,7 +55,9 @@
     "features": [
       "log4rs",
       "portal"
-    ]
+    ],
+    "runner": "ubuntu-24.04",
+    "emulator": "qemu-arm"
   },
   {
     "target": "riscv64gc-unknown-linux-musl",
@@ -61,13 +68,50 @@
     "features": [
       "log4rs",
       "portal"
-    ]
+    ],
+    "runner": "ubuntu-24.04",
+    "emulator": "qemu-riscv64"
   },
   {
     "target": "x86_64-pc-windows-msvc",
     "machine": 34404,
     "bits": 64,
     "format": "pe",
-    "openwrt": false
+    "openwrt": false,
+    "runner": "windows-latest",
+    "npcap_arch": "x64"
+  },
+  {
+    "target": "aarch64-unknown-linux-gnu",
+    "machine": 183,
+    "bits": 64,
+    "format": "elf",
+    "openwrt": false,
+    "runner": "ubuntu-24.04-arm"
+  },
+  {
+    "target": "x86_64-apple-darwin",
+    "machine": 16777223,
+    "bits": 64,
+    "format": "macho",
+    "openwrt": false,
+    "runner": "macos-15-intel"
+  },
+  {
+    "target": "aarch64-apple-darwin",
+    "machine": 16777228,
+    "bits": 64,
+    "format": "macho",
+    "openwrt": false,
+    "runner": "macos-15"
+  },
+  {
+    "target": "aarch64-pc-windows-msvc",
+    "machine": 43620,
+    "bits": 64,
+    "format": "pe",
+    "openwrt": false,
+    "runner": "windows-11-arm",
+    "npcap_arch": "ARM64"
   }
 ]

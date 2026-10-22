@@ -442,3 +442,69 @@ fn sigterm_while_waiting_for_periodic_check_logs_out_and_runs_offline_hook() {
 fn sigterm_during_pending_http_check_logs_out_and_runs_offline_hook() {
     termination_lifecycle(true);
 }
+
+#[cfg(unix)]
+fn private_control_lifecycle(send_stop: bool) {
+    use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+    use std::os::unix::net::UnixListener;
+    let directory = Directory::new();
+    directory.config(Some("test-student"), "");
+    let server = PortalMock::new(false);
+    // Use a short, dedicated private directory even on macOS's long TMPDIR.
+    let control = Directory(std::path::Path::new("/tmp").join(format!(
+        "d4s-cli-{}-{}",
+        std::process::id(),
+        NEXT_DIRECTORY.fetch_add(1, Ordering::SeqCst)
+    )));
+    std::fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&control.0)
+        .unwrap();
+    let socket = control.0.join("c.sock");
+    let listener = UnixListener::bind(&socket).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    std::fs::set_permissions(&socket, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let mut command = server.command(&directory);
+    command
+        .arg("--password-stdin")
+        .arg("--control-socket")
+        .arg(&socket);
+    let process = Process::start(command, Some(PASSWORD));
+    let mut stream = None;
+    assert!(wait_until(Duration::from_secs(10), || {
+        match listener.accept() {
+            Ok((accepted, _)) => {
+                stream = Some(accepted);
+                true
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => false,
+            Err(error) => panic!("private control accept failed: {error}"),
+        }
+    }));
+    assert!(wait_until(Duration::from_secs(10), || {
+        directory.0.join("status.json").is_file() && directory.status()["online"] == true
+    }));
+    let mut stream = stream.unwrap();
+    stream.set_nonblocking(false).unwrap();
+    if send_stop {
+        stream.write_all(b"stop\n").unwrap();
+    }
+    drop(stream);
+    assert_private_success(&process.finish());
+    assert_eq!(server.logins.load(Ordering::SeqCst), 1);
+    assert_eq!(server.logouts.load(Ordering::SeqCst), 1);
+    assert_eq!(directory.status()["phase"], "offline");
+    assert_eq!(directory.status()["online"], false);
+}
+
+#[cfg(unix)]
+#[test]
+fn private_unix_socket_stop_logs_out_the_real_portal_cli() {
+    private_control_lifecycle(true);
+}
+
+#[cfg(unix)]
+#[test]
+fn private_unix_socket_parent_eof_logs_out_the_real_portal_cli() {
+    private_control_lifecycle(false);
+}

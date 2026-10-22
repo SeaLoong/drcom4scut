@@ -61,6 +61,7 @@ fn help_and_version_do_not_create_config_or_open_device() {
     assert!(help.status.success(), "{}", output_text(&help));
     assert!(output_text(&help).contains("--check-config"));
     assert!(output_text(&help).contains("--control-pipe"));
+    assert!(output_text(&help).contains("--control-socket"));
     assert!(output_text(&help).contains("--password-stdin"));
     let version = run(&dir, &["--version"]);
     assert!(version.status.success());

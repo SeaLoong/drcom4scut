@@ -30,7 +30,7 @@ no_udp: false
 
 ## 密码与路径
 
-推荐使用单独的密码文件，只保存一行不带 BOM 的 UTF-8 密码，可有一个结尾换行。Unix 下必须为普通文件、单链接，且组和其他用户无读写执行权限（通常设为 `0600` 或 `0400`）。Windows 普通运行应使用当前用户私有目录；[Windows 服务](windows-service.md)与 [OpenWrt 服务](openwrt.md)另有严格的所有者和 ACL/权限要求。
+推荐使用单独的密码文件，只保存一行不带 BOM 的 UTF-8 密码，可有一个结尾换行。Linux、macOS 下必须为普通文件、单链接，且组和其他用户无读写执行权限（通常设为 `0600` 或 `0400`）。Windows 普通运行应使用当前用户私有目录；[Windows 服务](windows-service.md)与 [OpenWrt 服务](openwrt.md)另有严格的所有者和 ACL/权限要求。macOS 的密码文件权限与 [BPF 抓包权限](macos.md#有线抓包权限)分别配置。
 
 密码来源按以下优先级选用：`--password-stdin`、`--password-file PATH`、旧版 `--password` 参数、YAML `password_file`、YAML `password`。前三种命令行密码选项不能同时使用；配置中不要同时填写非空的 `password` 和 `password_file`。旧版明文参数仅用于兼容，日常操作使用文件，GUI 使用私有标准输入管道。
 

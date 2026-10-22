@@ -43,7 +43,7 @@ LuoMuQAQ 的两个 `feature/native-heroui-*` 分支主要为历史 GUI 视觉迭
 | 长时间没有 UDP 心跳时持续忽略 | [issue #44](https://github.com/SeaLoong/drcom4scut/issues/44)、[PR #47](https://github.com/SeaLoong/drcom4scut/pull/47) | 有限重试、明确失败和重连；恢复等待采用有上限的退避。 |
 | 网线拔插、休眠唤醒、DHCP 换地址后不恢复 | [issue #34](https://github.com/SeaLoong/drcom4scut/issues/34)、gchh1 监测器、LuoMuQAQ 稳定性修复 | 接口或实际 IPv4 变化需要重建对应会话，并取消已失效的任务。 |
 | 同时连接 Wi-Fi 时校园 DNS/UDP 从错误网卡发出 | gchh1 `src/socket.rs`、README 实测描述 | DNS 和 UDP 绑定选中的有线 IPv4；EAP 报文中的地址覆盖与 UDP 实际源地址分开。 |
-| 密码写入 argv、配置和启动日志 | LuoMuQAQ vendor `PATCHES.md`、gchh1 服务配置保护 | 凭据保存与传递分别处理：GUI 使用 Windows 用户级 DPAPI，核心通过私有标准输入接收密码。 |
+| 密码写入 argv、配置和启动日志 | LuoMuQAQ vendor `PATCHES.md`、gchh1 服务配置保护 | 凭据保存与传递分别处理：GUI 使用对应系统的用户级密码保护，Windows 保留 DPAPI；核心通过私有标准输入接收密码。 |
 | GUI 关闭而认证子进程仍运行、断开未发送 Logoff | LuoMuQAQ 父进程监督与退出补丁、trv3wood 服务退出信号 | 核心提供有界 Logoff，GUI 对自己启动的进程执行异步退出和兜底清理，不按名称杀死其他进程。 |
 | 自诊断、自动启动、服务、日志与状态区分 | gchh1 管理 CLI、LuoMuQAQ GUI | 明确区分进程运行、EAP 成功与完整 UDP 心跳；平台启动入口与安全配置必须按对应平台验证。 |
 | EAP-only、日志关闭、DNS 命令行覆盖 | QvPing `src/main.rs` | 仅 EAP 模式不执行 UDP；状态含义须与选定的模式一致。 |
