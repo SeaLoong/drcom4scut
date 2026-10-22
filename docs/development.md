@@ -104,12 +104,22 @@ SDK 按其发行版生成 `.ipk` 或 `.apk`。该包只包含 JS、Shell、JSON 
 
 平台清单同时驱动构建矩阵、[打包器](https://github.com/SeaLoong/drcom4scut/blob/master/.github/scripts/package_release.py)和[发布完整性检查](https://github.com/SeaLoong/drcom4scut/blob/master/.github/scripts/verify_release.py)。Cargo 命令显式指定 target，打包前核对 ELF/PE、CPU、位宽、端序、静态属性、ARM 基线/ABI 和实际版本。包内包含程序、配置示例、文档、许可证及相应 OpenWrt 资源，并生成 SHA-256。
 
+## 自动预发布
+
+推送到本仓库 `master` 后，全部验证和七个平台构建成功才会自动创建 Preview。它直接使用本次 CI 的产物，不重新构建；PR、其他分支、fork 和手动运行普通 CI 均不发布。
+
+预发布标签为 `preview-运行号-尝试号-提交号前八位`，固定指向本次完整提交号，不覆盖已有标签。程序版本仍采用 `Cargo.toml`，下载时通过预发布标签和说明中的提交号辨认构建。Preview 标记为 Pre-release，且不会替换正式版的 Latest。
+
+[预发布器](https://github.com/SeaLoong/drcom4scut/blob/master/.github/scripts/publish_preview.py)先创建草稿，上传归档与 `SHA256SUMS`，核对远端文件集合、大小和 SHA-256 后才公开。失败上传保留为草稿；旧提交或已被更新运行取代的任务不会重新发布旧产物。仅保留最近十个本流程已公开的 Preview，清理 Release 时保留 Git 标签，正式版、草稿和其他预发布不受影响。
+
+实现参考 [Sensa 的自动预发布与手动发布](https://github.com/SeaLoong/Sensa/tree/9dc7de27645fb484fa52711656bf31b05ff3f84a/.github/workflows)。普通 CI 在主分支不取消正在运行的发布，只有最终发布 job 获得 `contents: write`；发布使用内置 `github.token`，不需要额外 PAT。
+
 ## 手动发布
 
 1. 更新 `Cargo.toml`、相关打包元数据和 [CHANGELOG](../CHANGELOG.md)，提交源码及锁文件，确认普通 CI 结果。
 2. 在默认分支已有工作流的仓库中打开 **Actions → Manual release → Run workflow**，选择待发布引用，填写与 manifest 一致的标签，如 `v0.4.1`。
 3. `draft` 默认开启。保留它会创建草稿；取消后会直接发布。
 
-工作流重新执行共用验证、检查全部平台包与校验和，核对最终标签仍指向已验证提交，然后创建 Release。它拒绝覆盖其他提交的标签及既有 Release。只有最终发布 job 有写权限。普通 Git 推送仅触发 CI，不执行该手动发布流程。
+工作流重新执行共用验证、检查全部平台包与校验和，核对最终标签仍指向已验证提交，然后创建 Release。它拒绝覆盖其他提交的标签及既有 Release。只有最终发布 job 有写权限。正式发布仅接受手动触发，普通 Git 推送只会按上述条件自动创建 Preview。
 
 来源快照、许可证和协议证据见[派生仓库记录](references-forks.md)与[相关客户端记录](references-clients.md)。新增兼容行为应附独立报文样本或可重复的协议测试，并明确实机验证范围。

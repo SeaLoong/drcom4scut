@@ -6,7 +6,7 @@
 
 ## 下载与安装
 
-在 [Releases](https://github.com/SeaLoong/drcom4scut/releases) 选择已发布版本，也可从 [Actions](https://github.com/SeaLoong/drcom4scut/actions) 下载构建产物。下载后核对包的 SHA-256，再解压到自己有写入权限的目录。
+在 [Releases](https://github.com/SeaLoong/drcom4scut/releases) 选择正式版，或标记为 **Pre-release** 的 Preview 测试版；也可从 [Actions](https://github.com/SeaLoong/drcom4scut/actions) 下载构建产物。下载后核对包的 SHA-256，再解压到自己有写入权限的目录。
 
 | 使用环境 | 选择的包 | 运行前准备 |
 | --- | --- | --- |
