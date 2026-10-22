@@ -1,41 +1,76 @@
-# 无线 ePortal 接入
+# 无线门户登录
 
-无线 Web Portal 与有线 802.1X/EAP + UDP DrCOM 是独立接入方式。只有明确选择 `mode: portal` 时才使用本模块；不会根据外网连通性自动切换协议、修改路由或发送账号。
+适用于学校的 DrCOM/ePortal Web 登录。先通过系统或路由器连接校园无线网络，再让客户端进行门户认证。Portal 与有线 EAP + UDP 是两种接入方式，需显式设置 `mode: portal`；Portal 不需要 Npcap 或原始抓包权限。
 
-## 信任与凭据边界
+## 配置
 
-配置门户地址前，应在校园网浏览器中核对学校实际使用的域名、入口及证书。默认门户为 `https://s.scut.edu.cn`，API 默认使用同域 HTTPS 802 端口；如果校区使用其他入口，应显式配置，不通过任意第三方网站推断可信登录地址。`api_url` 只能使用与 `base_url` 相同的主机，HTTPS 不允许推断降级至 HTTP。入口 URL 查询只允许公开的网关/终端元数据；包含账号、密码、令牌或其他未知查询参数的登录 URL 会被拒绝，包括百分号编码和大小写变体。请使用裸门户地址或带 `wlanacip` 等设备参数的入口，不要粘贴已填写凭据的请求。API 配置地址不允许查询参数。
-
-密码仍使用核心的私有密码文件或标准输入管道。门户协议本身要求把账号密码放入登录 HTTP GET 查询，不能宣称本地安全传递已经替学校协议提供了端到端加密。HTTPS 在证书验证通过时保护传输；HTTP 801 等部署必须显式设置 `portal.allow_http: true`，这意味着本地网络旁观者可能看到凭据。程序保留 TLS 校验，不记录请求 URL、密码、完整响应及可能回显密码的远端错误文本。
-
-默认构建含 `portal-tls`。较小的 OpenWrt 构建可使用 `--no-default-features --features portal`，此时仅支持明确授权的 HTTP 门户；HTTPS 会明确报错，不会降级。包含 HTTPS 的交叉构建还需要 TLS 后端的目标 C 工具链，不能将 HTTP-only 产物当作 HTTPS 版本。
-
-## 配置字段
+在校园网络中核对学校实际使用的门户域名与证书，使用裸入口地址或只含公开网关参数的入口链接。不要粘贴包含账号、密码、token 的已填写登录 URL。
 
 ```yaml
 mode: portal
-username: 'student'
-password_file: '/etc/drcom4scut/password'
+username: '你的校园网账号'
+password_file: password
 portal:
   base_url: 'https://s.scut.edu.cn'
   api_url: 'https://s.scut.edu.cn:802'
-  # ac_ip: '192.0.2.254'  # 自动发现不可用时填写校园入口给出的 AC 地址
-  # client_ip: '192.0.2.10'  # 通常从 chkstatus 返回值读取
   allow_http: false
 ```
 
-`ac_ip`、`client_ip` 和示例 MAC 不是通用校园参数，文中的地址只用于说明。未配置 AC 时，从用户明确指定的入口 URL 的 `wlanacip` 查询参数、同源跳转或简单入口页面赋值中读取。跨源跳转被拒绝；即使登录端点返回跳转，也不会把凭据继续发送至跳转目标。不同校区域名应由用户明确选择。可选的顶层 `mac` 字段会用于在线会话归属确认。顶层 `ip` 选择真实 HTTP 传输源地址；`portal.client_ip` 是门户观察到的认证身份，两者在 NAT 等场景可以不同，程序不会把身份覆盖值当作本机地址配置。默认单次请求超时 5 秒，登录后最多确认 5 次，确认间隔 2 秒。
+这里的域名是默认值，应按实际校区入口核对。密码文件格式与权限见[配置参考](configuration.md#密码与路径)。`api_url` 可省略：HTTPS 入口默认使用同主机 802 端口，HTTP 入口默认使用同主机 801 端口。显式 API 地址仍须与入口使用同一主机，且不带查询参数。
 
-## 在线判定和生命周期
+| 字段 | 何时填写 |
+| --- | --- |
+| `portal.base_url` | 可信门户入口；可带学校提供的 `wlanacip` 等公开网关参数 |
+| `portal.api_url` | 学校 API 端口或入口与默认值不同时 |
+| `portal.ac_ip` | 入口的同源参数或页面无法提供 AC IPv4 时，填写学校给出的地址 |
+| `portal.client_ip` | 门户无法报告客户端 IPv4 时，填写门户识别的终端地址 |
+| 顶层 `ip` | 需要固定 HTTP 请求的实际本地 IPv4 时；该地址必须属于本机 |
+| 顶层 `mac` | 已知终端 MAC，需要核对在线会话归属时 |
 
-客户端先请求 `/drcom/chkstatus` 获取本机 IPv4/MAC，再查询 `/eportal/portal/online_list`。只有在线表存在本机 IP，且已知 MAC 时必须存在有效、匹配的会话 MAC，才报告在线；缺失或非法 MAC 不会退回仅按 IP 判定。`result: 1`、空在线表或其他设备的 `is_owner_ip: 1` 都不算本机认证成功。登录返回成功后仍有次数及时间上限地轮询确认，不将“请求被受理”误报为“已放行”。
+通常不必填写 `ac_ip` 和 `client_ip`。客户端会从可信入口发现 AC，并向门户查询当前终端信息。门户看到的 `client_ip` 与本机传输源 `ip` 在 NAT 等环境中可能不同；配置前应确认二者含义，不要直接套用其他设备的地址。
 
-登录采用 ePortal 的 `login_method=1`、账号原样传递、`wlan_user_mac=000000000000` 及指定 AC 地址。不自动添加运营商后缀；如果学校要求后缀，直接填写完整账号。退出请求同样复查本机在线表。异步请求、轮询和重连可通过关闭信号取消，没有脱离主会话的重试任务。
+## 启动、查看状态和退出
 
-每个响应最多读取 64 KiB；请求有超时，JSONP 只接受客户端自己的回调名且不执行 JavaScript；兼容 UTF-8 和历史 GB18030/GBK 响应文本。在线确认有上限。错误返回不包含原始 URL 或远端错误回显。
+```sh
+./drcom4scut --config portal.yml --check-config
+./drcom4scut --config portal.yml --status-file portal-status.json
+```
 
-## 验证范围与参考
+另一个终端中查看：
 
-本模块使用真实 loopback HTTP 模拟服务器和 CLI 子进程覆盖账号参数编码、登录后确认、本机与他机会话区分、同源 AC 发现、恶意跳转拒绝、HTTP opt-in、无 TLS 版本拒绝 HTTPS、异常及超大响应、超时、取消和注销确认。CLI 回归还覆盖配置选择 Portal 的无凭据 `--logoff`、长账号、实际 HTTP 源地址，以及 SIGTERM 在轮询等待或 HTTP 请求挂起期间均完成注销、离线状态和成对上线/下线 hook。云环境没有校园网无线接入，不能把这些检查描述为真实校区认证成功。
+```sh
+./drcom4scut status --status-file portal-status.json
+```
 
-行为参考：MIT 项目 [Breeze1733/luci-app-scut-autologin](https://github.com/Breeze1733/luci-app-scut-autologin/tree/0143bb299dc35642ab54025c55bdbfbc4460a01f) 的公开门户调用记录，以及 MIT 项目 [YiZhiQvQ/SCUTNetLogin](https://github.com/YiZhiQvQ/SCUTNetLogin/tree/65470c3da502527fa5f20673d71639c8bebb9747) 的在线会话归属判断。此处使用独立的 Rust 实现和虚构测试地址，没有复制账号、真实认证流量或运行脚本；完整检索范围见 [相关客户端调研](references-clients.md)。
+客户端会确认学校在线列表中存在当前设备的 IP；已知 MAC 时，还需匹配该会话的 MAC。登录请求被接受、HTTP 成功或其他设备在线，都不会直接标记本机在线。Portal 状态的 `online: true` 表示门户确认成功，`eap_authenticated` 为 `false`，因为此模式不执行 EAP。
+
+如果在线列表明确显示本机属于另一账号，客户端会提示，既不把它当作所选账号登录成功，也不自动踢掉该账号。换号时先显式执行下方注销命令，再用新的账号运行。学校没有返回账号归属时，在线状态仅确认当前设备的网络会话，不能证明某个特定账号的归属。
+
+按 Ctrl-C 停止；Linux SIGTERM 也会触发注销。需要单独退出现有门户会话时：
+
+```sh
+./drcom4scut --config portal.yml --logoff
+```
+
+注销不需要读取账号密码，但仍需要正确的门户及终端信息。它会向学校查询当前会话并确认退出，不会启动重新登录。
+
+## 使用 HTTP 门户
+
+部分学校入口使用明文 HTTP。只有确认学校提供该入口时，才把地址改为对应 HTTP URL，并显式设置 `portal.allow_http: true` 或添加 `--allow-insecure-portal`。例如 API 可为学校确认的同主机 `http://...:801`；不要仅因为 HTTPS 失败就猜测或降级。
+
+HTTP 登录会在网络上传输认证所需的账号密码；本地密码文件权限不能加密这段传输。HTTPS 构建保留证书校验，`--require-https-portal` 可覆盖配置中的 HTTP 许可。GNU/Windows 默认包支持 HTTPS；预编译 OpenWrt 静态包只支持显式允许的 HTTP 门户，遇到 HTTPS 会报不支持 TLS。
+
+## 常见问题
+
+| 提示或现象 | 处理方式 |
+| --- | --- |
+| `HTTP portal requires explicit...` | 先核对学校入口；只有确认使用 HTTP 后才开启许可 |
+| `HTTPS portal requires...portal-tls` | 换用包含 HTTPS 的程序；自行构建见[开发文档](development.md#构建特性) |
+| `Portal AC address was not discovered` | 核对可信入口里的 `wlanacip`，或填写学校提供的 `portal.ac_ip` |
+| `Portal did not report a usable client IPv4` | 核对当前无线连接及门户观察到的地址，必要时填写 `portal.client_ip` |
+| `Portal redirect was rejected` | 核对学校实际门户主机，更新显式配置；不要把密码转发给未知跳转目标 |
+| `accepted login but did not confirm...` | 检查账号是否需运营商后缀、是否识别了正确终端，以及学校在线列表是否已有本机会话 |
+
+账号按配置原样发送；如果学校要求运营商后缀，应填写完整账号。请求、在线确认和注销均有时间及次数上限。需要报告问题时，只提供已脱敏的错误类别与配置字段名称，不提供登录请求 URL、密码或原始服务器回显。
+
+公开协议参考见[相关客户端记录](references-clients.md)。开发者模拟测试范围见[开发与验证](development.md#测试层次)；实际校区的可用性仍以目标网络验证为准。

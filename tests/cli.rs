@@ -254,6 +254,58 @@ fn password_file_is_relative_to_config_and_never_echoed() {
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn nonregular_password_file_is_rejected_without_waiting_for_fifo_writer() {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    use std::process::Stdio;
+    use std::time::{Duration, Instant};
+
+    let dir = TempDir::new();
+    config(&dir, "");
+    let fifo = dir.path().join("password.fifo");
+    let fifo_name = CString::new(fifo.as_os_str().as_bytes()).unwrap();
+    // The owned temporary path is a terminated C string and mode has no pointers.
+    assert_eq!(unsafe { libc::mkfifo(fifo_name.as_ptr(), 0o600) }, 0);
+    let mut child = command(&dir)
+        .args(["--check-config", "--password-file", "password.fifo"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while child.try_wait().unwrap().is_none() {
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("password file validation waited for a FIFO writer");
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let output = child.wait_with_output().unwrap();
+    assert!(!output.status.success());
+    assert!(output_text(&output).contains("Password file must be a regular file"));
+    assert!(!output_text(&output).contains("e2e-private-password"));
+}
+
+#[cfg(feature = "portal")]
+#[test]
+fn portal_check_config_rejects_invalid_accounts_without_network_access() {
+    let dir = TempDir::new();
+    config(
+        &dir,
+        "mode: portal\nportal: {base_url: 'http://127.0.0.1:9', allow_http: true}",
+    );
+    for username in ["line\nbreak".to_owned(), "a".repeat(4097)] {
+        let output = run(&dir, &["--check-config", "--username", &username]);
+        assert!(!output.status.success());
+        assert!(output_text(&output).contains("Invalid username:"));
+        assert!(!output_text(&output).contains(&username));
+        assert!(!dir.path().join("logs").exists());
+    }
+}
+
 #[test]
 fn inspection_and_initialization_do_not_need_account_data() {
     let dir = TempDir::new();

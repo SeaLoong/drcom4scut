@@ -17,11 +17,6 @@ pub struct Device {
     pending_receive: tokio::sync::Mutex<Option<JoinHandle<Result<Vec<u8>>>>>,
 }
 
-#[inline]
-fn filter_interface<P: FnMut(&NetworkInterface) -> bool>(f: P) -> Option<NetworkInterface> {
-    get_all_interfaces().into_iter().find(f)
-}
-
 fn get_first_valid_ip(e: &NetworkInterface) -> Option<&IpNetwork> {
     e.ips
         .iter()
@@ -286,13 +281,7 @@ mod windows_inventory {
 }
 
 pub fn get_device(mac: Option<MacAddr>, ip: Option<IpAddr>) -> Result<Device> {
-    if let Some(m) = mac {
-        return Device::from_mac(m, ip);
-    }
-    if let Some(ip) = ip {
-        return Device::from_ip(ip);
-    }
-    Device::default_device()
+    get_device_on(None, mac, ip)
 }
 
 /// Select a named link without falling back to Wi-Fi or another adapter.
@@ -301,41 +290,115 @@ pub fn get_device_on(
     mac: Option<MacAddr>,
     ip: Option<IpAddr>,
 ) -> Result<Device> {
-    let Some(name) = name else {
-        return get_device(mac, ip);
-    };
-    let interface = get_all_interfaces()
-        .into_iter()
-        .find(|interface| interface.name == name)
-        .ok_or_else(|| {
-            Error::new(
-                ErrorKind::NotFound,
-                format!("Ethernet interface {name} was not found"),
-            )
-        })?;
-    if mac.is_some_and(|mac| interface.mac != Some(mac)) {
-        return Err(Error::new(
-            ErrorKind::InvalidInput,
-            "Selected interface does not match configured MAC",
-        ));
-    }
-    let ip_net = match ip {
-        Some(ip) => interface
-            .ips
-            .iter()
-            .find(|network| network.ip() == ip)
-            .copied()
-            .unwrap_or(
-                IpNetwork::new(ip, if ip.is_ipv4() { 32 } else { 128 }).map_err(Error::other)?,
-            ),
-        None => *get_first_valid_ip(&interface).ok_or_else(|| {
+    let (interface, ip_net) = select_interface(get_all_interfaces(), name, mac, ip)?;
+    Device::with_ip_net(interface, ip_net)
+}
+
+fn assigned_ip(interface: &NetworkInterface, ip: Option<IpAddr>) -> Result<IpNetwork> {
+    match ip {
+        Some(ip) => {
+            if !usable_ipv4(ip) {
+                return Err(Error::new(
+                    ErrorKind::InvalidInput,
+                    "Selected Ethernet source must be a usable IPv4 address",
+                ));
+            }
+            interface
+                .ips
+                .iter()
+                .find(|network| network.ip() == ip)
+                .copied()
+                .ok_or_else(|| Error::new(
+                    ErrorKind::AddrNotAvailable,
+                    "Configured IP is not assigned to the selected Ethernet interface; use --eap-ip or --udp-ip for protocol payload overrides",
+                ))
+        }
+        None => get_first_valid_ip(interface).copied().ok_or_else(|| {
             Error::new(
                 ErrorKind::AddrNotAvailable,
                 "Selected Ethernet interface has no usable IPv4 address",
             )
-        })?,
-    };
-    Device::with_ip_net(interface, ip_net)
+        }),
+    }
+}
+
+// Select from one inventory snapshot before opening capture. A bridge and its
+// physical port can share a MAC, so matching the MAC alone is not sufficient to
+// decide where EAP frames and the selected source IP must be sent.
+fn select_interface(
+    interfaces: Vec<NetworkInterface>,
+    name: Option<&str>,
+    mac: Option<MacAddr>,
+    ip: Option<IpAddr>,
+) -> Result<(NetworkInterface, IpNetwork)> {
+    if let Some(name) = name {
+        let interface = interfaces
+            .into_iter()
+            .find(|interface| interface.name == name)
+            .ok_or_else(|| {
+                Error::new(
+                    ErrorKind::NotFound,
+                    format!("Ethernet interface {name} was not found"),
+                )
+            })?;
+        if mac.is_some_and(|mac| interface.mac != Some(mac)) {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "Selected interface does not match configured MAC",
+            ));
+        }
+        let ip_net = assigned_ip(&interface, ip)?;
+        return Ok((interface, ip_net));
+    }
+    if mac.is_none() && ip.is_none() {
+        return interfaces.into_iter().find_map(|interface| {
+            if !interface.is_loopback()
+                && interface.is_up()
+                && interface.mac.is_some_and(|mac| !mac.is_zero())
+            {
+                get_first_valid_ip(&interface).copied().map(|ip_net| (interface, ip_net))
+            } else {
+                None
+            }
+        }).ok_or_else(|| Error::new(
+            ErrorKind::NotFound,
+            "No active Ethernet interface with a usable IPv4 address; use --list-interfaces or --interface",
+        ));
+    }
+    if ip.is_some_and(|ip| !usable_ipv4(ip)) {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            "Selected Ethernet source must be a usable IPv4 address",
+        ));
+    }
+    let mut candidates = interfaces
+        .into_iter()
+        .filter(|interface| mac.is_none_or(|mac| interface.mac == Some(mac)))
+        .collect::<Vec<_>>();
+    if candidates.is_empty() {
+        return Err(Error::new(
+            ErrorKind::NotFound,
+            "No Ethernet interface matches the selection",
+        ));
+    }
+    if let Some(ip) = ip {
+        candidates.retain(|interface| interface.ips.iter().any(|network| network.ip() == ip));
+        if candidates.is_empty() {
+            return Err(Error::new(
+                ErrorKind::AddrNotAvailable,
+                "Configured source IP is not assigned to an interface matching the selection; use --eap-ip or --udp-ip for protocol payload overrides",
+            ));
+        }
+    }
+    if candidates.len() > 1 {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            "Ethernet interface selection is ambiguous; specify --interface or an assigned --ip",
+        ));
+    }
+    let interface = candidates.pop().expect("one matching interface");
+    let ip_net = assigned_ip(&interface, ip)?;
+    Ok((interface, ip_net))
 }
 
 /// Inspect inventory only: no capture handle, credentials or network traffic.
@@ -352,60 +415,15 @@ pub fn current_ipv4(name: &str) -> Option<Ipv4Addr> {
 
 impl Device {
     pub fn from_mac(mac: MacAddr, ip: Option<IpAddr>) -> Result<Device> {
-        let interface = filter_interface(|e| match e.mac {
-            Some(ref m) => *m == mac,
-            None => false,
-        });
-        match interface {
-            Some(interface) => match ip {
-                Some(ip) => {
-                    let ip_net = interface
-                        .ips
-                        .iter()
-                        .find(|i| i.ip() == ip)
-                        .copied()
-                        .unwrap_or_else(|| {
-                            IpNetwork::new(ip, if ip.is_ipv4() { 32 } else { 128 }).unwrap()
-                        });
-                    Device::with_ip_net(interface, ip_net)
-                }
-                None => Device::new(interface),
-            },
-            None => Err(Error::new(
-                ErrorKind::NotFound,
-                format!("Can't get interface which MAC address is {mac}."),
-            )),
-        }
+        get_device_on(None, Some(mac), ip)
     }
 
     pub fn from_ip(ip: IpAddr) -> Result<Device> {
-        let mut ip_net = IpNetwork::new(IpAddr::from(Ipv4Addr::new(0, 0, 0, 0)), 0).unwrap();
-        let interface = filter_interface(|e| {
-            for i in &e.ips {
-                if i.ip() == ip {
-                    ip_net = *i;
-                    return true;
-                }
-            }
-            false
-        });
-        match interface {
-            Some(interface) => Device::with_ip_net(interface, ip_net),
-            None => Err(Error::new(
-                ErrorKind::NotFound,
-                format!("Can't get interface which IP address is {ip}."),
-            )),
-        }
+        get_device_on(None, None, Some(ip))
     }
 
     pub fn new(interface: NetworkInterface) -> Result<Device> {
-        let ip = if let Some(ip) = get_first_valid_ip(&interface) {
-            ip.to_owned()
-        } else if let Some(ip) = interface.ips.first() {
-            ip.to_owned()
-        } else {
-            IpNetwork::new(IpAddr::from(Ipv4Addr::new(0, 0, 0, 0)), 0).unwrap()
-        };
+        let ip = assigned_ip(&interface, None)?;
         Device::with_ip_net(interface, ip)
     }
 
@@ -437,20 +455,7 @@ impl Device {
     }
 
     pub fn default_device() -> Result<Device> {
-        let all_interfaces = get_all_interfaces();
-        for e in &all_interfaces {
-            if !e.is_loopback()
-                && e.is_up()
-                && e.mac.is_some_and(|mac| !mac.is_zero())
-                && let Some(ip_net) = get_first_valid_ip(e)
-            {
-                return Device::with_ip_net(e.to_owned(), ip_net.to_owned());
-            }
-        }
-        Err(Error::new(
-            ErrorKind::NotFound,
-            "No active Ethernet interface with a usable IPv4 address; use --list-interfaces or --interface",
-        ))
+        get_device_on(None, None, None)
     }
 
     pub async fn send(&self, data: Vec<u8>) -> Result<()> {
@@ -660,6 +665,149 @@ mod tests {
         ] {
             assert!(!usable_ipv4(ip.parse().unwrap()), "{ip}");
         }
+    }
+
+    fn inventory_entry(name: &str, index: u32, mac: MacAddr, ips: &[&str]) -> NetworkInterface {
+        NetworkInterface {
+            name: name.into(),
+            description: "synthetic inventory".into(),
+            index,
+            mac: Some(mac),
+            ips: ips.iter().map(|ip| ip.parse().unwrap()).collect(),
+            flags: 1,
+        }
+    }
+
+    #[test]
+    fn mac_and_ip_select_the_same_interface_even_when_a_bridge_shares_its_mac() {
+        let mac = MacAddr::new(2, 0, 0, 0, 0, 1);
+        let physical = inventory_entry("eth0", 1, mac, &["192.0.2.10/24"]);
+        let bridge = inventory_entry("br-wan", 2, mac, &["198.51.100.10/24"]);
+        for entries in [
+            vec![physical.clone(), bridge.clone()],
+            vec![bridge.clone(), physical.clone()],
+        ] {
+            let (selected, ip) = select_interface(
+                entries,
+                None,
+                Some(mac),
+                Some("198.51.100.10".parse().unwrap()),
+            )
+            .unwrap();
+            assert_eq!(selected.name, "br-wan");
+            assert_eq!(ip, "198.51.100.10/24".parse::<IpNetwork>().unwrap());
+        }
+    }
+
+    #[test]
+    fn mac_only_and_duplicated_ip_selections_reject_ambiguous_inventory() {
+        let mac = MacAddr::new(2, 0, 0, 0, 0, 1);
+        let physical = inventory_entry("eth0", 1, mac, &["192.0.2.10/24"]);
+        let mut bridge = inventory_entry("br-wan", 2, mac, &["198.51.100.10/24"]);
+        let error = select_interface(
+            vec![physical.clone(), bridge.clone()],
+            None,
+            Some(mac),
+            None,
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::InvalidInput);
+        assert!(error.to_string().contains("--interface"));
+        bridge.ips = physical.ips.clone();
+        let error = select_interface(
+            vec![physical, bridge],
+            None,
+            None,
+            Some("192.0.2.10".parse().unwrap()),
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn selected_source_ip_must_be_assigned_to_the_named_or_mac_selected_interface() {
+        let mac = MacAddr::new(2, 0, 0, 0, 0, 1);
+        let interface = inventory_entry("eth0", 1, mac, &["192.0.2.10/24"]);
+        for name in [None, Some("eth0")] {
+            let error = select_interface(
+                vec![interface.clone()],
+                name,
+                Some(mac),
+                Some("198.51.100.10".parse().unwrap()),
+            )
+            .unwrap_err();
+            assert_eq!(error.kind(), ErrorKind::AddrNotAvailable);
+            assert!(error.to_string().contains("--eap-ip"));
+            assert!(error.to_string().contains("--udp-ip"));
+        }
+        let other = inventory_entry(
+            "eth1",
+            2,
+            MacAddr::new(2, 0, 0, 0, 0, 2),
+            &["198.51.100.10/24"],
+        );
+        assert_eq!(
+            select_interface(
+                vec![interface, other],
+                None,
+                Some(mac),
+                Some("198.51.100.10".parse().unwrap()),
+            )
+            .unwrap_err()
+            .kind(),
+            ErrorKind::AddrNotAvailable,
+            "MAC and IP constraints must match one interface, not separate links",
+        );
+    }
+
+    #[test]
+    fn explicit_name_disambiguates_a_shared_mac_and_preserves_assigned_prefix() {
+        let mac = MacAddr::new(2, 0, 0, 0, 0, 1);
+        let physical = inventory_entry("eth0", 1, mac, &["192.0.2.10/24"]);
+        let bridge = inventory_entry("br-wan", 2, mac, &["198.51.100.10/27"]);
+        let (interface, ip) =
+            select_interface(vec![physical, bridge], Some("br-wan"), Some(mac), None).unwrap();
+        assert_eq!(interface.name, "br-wan");
+        assert_eq!(ip, "198.51.100.10/27".parse::<IpNetwork>().unwrap());
+    }
+
+    #[test]
+    fn explicit_selection_rejects_mismatched_mac_and_links_without_ipv4() {
+        let mac = MacAddr::new(2, 0, 0, 0, 0, 1);
+        let interface = inventory_entry("eth0", 1, mac, &["2001:db8::1/64"]);
+        assert_eq!(
+            select_interface(vec![interface.clone()], Some("eth0"), None, None)
+                .unwrap_err()
+                .kind(),
+            ErrorKind::AddrNotAvailable,
+        );
+        assert_eq!(
+            select_interface(
+                vec![interface.clone()],
+                Some("eth0"),
+                Some(MacAddr::new(2, 0, 0, 0, 0, 2)),
+                None,
+            )
+            .unwrap_err()
+            .kind(),
+            ErrorKind::InvalidInput,
+        );
+        assert_eq!(
+            Device::new(interface).err().unwrap().kind(),
+            ErrorKind::AddrNotAvailable,
+            "no usable source address must fail before capture is opened",
+        );
+    }
+
+    #[test]
+    fn automatic_selection_keeps_the_first_active_usable_interface() {
+        let mac = MacAddr::new(2, 0, 0, 0, 0, 1);
+        let mut down = inventory_entry("down", 1, mac, &["192.0.2.10/24"]);
+        down.flags = 0;
+        let active = inventory_entry("wan", 2, mac, &["2001:db8::1/64", "198.51.100.10/24"]);
+        let (interface, ip) = select_interface(vec![down, active], None, None, None).unwrap();
+        assert_eq!(interface.name, "wan");
+        assert_eq!(ip, "198.51.100.10/24".parse::<IpNetwork>().unwrap());
     }
 
     struct Sender;

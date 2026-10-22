@@ -6,6 +6,7 @@
 /target
 /logs
 config.yml
+!/packaging/openwrt/files/config.yml
 
 #project
 Packet.lib

@@ -1,95 +1,104 @@
-# drcom4scut 0.4.0
+# drcom4scut
 
-使用稳定版 Rust / Tokio 的华南理工大学网络认证客户端，支持有线 802.1X + DrCOM、仅 EAP，以及显式配置的无线 DrCOM/ePortal。
+华南理工大学校园网认证客户端，可在 Windows、Linux 和受支持的 OpenWrt 设备上使用。
 
-本次升级对照了原仓库的 11 个直接 fork、GUI 的 1 个 fork、公开分支和问题记录，并检查了其他 SCUT 客户端。来源、提交、许可证、功能处理结果及检索范围见[派生版本调研](docs/references-forks.md)和[相关客户端调研](docs/references-clients.md)。检索结果代表这些公开来源，不代表已穷尽 GitHub 上所有代码。
+支持有线 EAP + UDP 认证、仅 EAP 认证，以及无线 DrCOM/ePortal 登录；提供网卡选择、断线重连、连接状态、日志和退出注销。Windows 用户可配合 [drcom4scutGUI](https://github.com/SeaLoong/drcom4scutGUI) 使用图形界面，路由器用户可安装 LuCI 管理页。
 
-## 下载和运行
+## 下载与安装
 
-从 GitHub Actions 的构建产物或 Releases 下载与 CPU、ABI 匹配的包。Linux 有 GNU 和静态 musl 产物；OpenWrt 支持的架构、安装和 procd/LuCI 集成见 [OpenWrt 文档](docs/openwrt.md)。Windows 真实有线认证需要安装 [Npcap](https://npcap.com/#download)。
+在 [Releases](https://github.com/SeaLoong/drcom4scut/releases) 选择已发布版本，也可从 [Actions](https://github.com/SeaLoong/drcom4scut/actions) 下载构建产物。下载后核对包的 SHA-256，再解压到自己有写入权限的目录。
 
-```sh
-./drcom4scut --list-interfaces
-./drcom4scut init --config /path/to/config.yml
-./drcom4scut doctor --interface eth0
-./drcom4scut --config /path/to/config.yml --check-config
-./drcom4scut run --config /path/to/config.yml --interface eth0
-```
+| 使用环境 | 选择的包 | 运行前准备 |
+| --- | --- | --- |
+| Windows x64 | `x86_64-pc-windows-msvc.zip` | 有线认证需安装 [Npcap](https://npcap.com/#download)；无线 Portal 不需要抓包驱动 |
+| Linux x86_64 | `x86_64-unknown-linux-gnu.tar.gz` | 有线认证需要抓包权限 |
+| Linux/OpenWrt 静态程序 | 对应 CPU 的 `linux-musl` / `linux-musleabi` 包 | 按 [OpenWrt 安装指南](docs/openwrt.md) 核对 CPU、ABI 和固件 |
 
-`doctor` 检查网卡、IPv4 和抓包权限，不发送认证报文，也不需要账号。Unix 有线认证需要原始抓包权限（例如 `CAP_NET_RAW`）；HTTP 代理不能替代校园侧以太网连接。`run` 可以省略，原有 `-c/-u/-m/-i/-H/-N/-t/-D` 参数保留。
+发布包包含程序、`config.example.yml`、文档和许可证。Windows 下使用 `drcom4scut.exe`，以下示例中的 `./drcom4scut` 在 PowerShell 中写作 `.\drcom4scut.exe`。
 
-### 密码传递与存储
+## 有线网络快速开始
 
-推荐在配置中使用 `password_file`，路径相对于配置文件；Unix 密码文件必须为普通文件、单链接、权限 `0600` 或 `0400`。Windows 应使用当前用户私有 ACL，Windows 服务则使用管理员/SYSTEM 私有目录。
+先连接校园网网线，确认网卡已有可用 IPv4。程序负责认证；IP 地址、DHCP 和系统网络设置由操作系统或路由器管理。
 
-```yaml
-username: '你的学号'
-password_file: password
-interface: eth0
-```
+1. 列出网卡，记录连接校园网的 `NAME`：
 
-密码文件仅包含一行 UTF-8 密码。不要在 shell 命令、命令行参数或环境变量里拼接密码。GUI 3.0.0 使用 DPAPI CurrentUser 保存密码，再通过 `--password-stdin` 的独立标准输入管道交给核心；发送后关闭管道。核心支持 `--password-file PATH`。旧 `-p/--password` 与 YAML `password` 仅为兼容保留，GUI 不会回退到这些方式；程序启动、诊断与状态文件不输出账号密码。旧版本已经写出的敏感日志不会因升级自动消失，应自行清理。
+   ```sh
+   ./drcom4scut --list-interfaces
+   ```
 
-### 常用能力
+2. 在当前目录创建配置模板：
 
-- `--interface NAME` 固定有线网卡，DNS 和 UDP 同时绑定真实本地地址及出口接口，避免 Wi-Fi/VPN/多默认路由干扰；不自动修改系统路由、防火墙或其他连接。
-- `--no-udp` / `no_udp: true` 仅执行 EAP；`--once` 验证一次完整认证/心跳后退出；`--no-log` 禁用文件日志。
-- 网卡丢失、DHCP IPv4 变化和认证失败会重新发现接口并重连。`reconnect` 到 `reconnect_max` 的有上限指数退避避免持续快速重试；UDP 失败不直接销毁健康 EAP 会话。
-- 合法初始 EAP 标识符、PAE 组播心跳和重新认证均有回归测试；畸形长度、乱序响应及过期认证结果不会提前进入在线状态。
-- `--status-file PATH` 输出无凭据的 JSON 在线状态；`status --status-file PATH` 读取状态；`logs` 显示配置日志的最近 200 行。状态区分 EAP 认证与完整 UDP 在线，文件时间戳用于识别旧状态。
-- Ctrl-C、SIGTERM 和 Windows 服务停止会取消会话并有界发送 Logoff。`--logoff --interface NAME` 可主动执行有线注销。
-- `hooks.online` / `hooks.offline` 可配置本地命令参数数组；不自动启动 shell、不传递密码，设置 `hooks.timeout` 限制执行时间。
+   ```sh
+   ./drcom4scut init --config config.yml
+   ```
 
-### 报文配置与 Windows 31 兼容
+   编辑 `config.yml` 中的账号、密码文件和网卡。将 `eth0` 换成上一步显示的实际名称：
 
-默认 `profile: legacy` 保留原版报文。选择 `profile: windows31` 可启用 260 字节 MiscInfo、启动心跳以及对应 MD5 扩展/版本字段。网关、第二 DNS、源端口及报文中的 IPv4 均可显式设置：
+   ```yaml
+   username: '你的校园网账号'
+   password_file: password
+   interface: eth0
+   ```
 
-```yaml
-profile: windows31
-local_port: 61440
-server_port: 61440
-gateway: 192.0.2.1
-# eap_ip: 192.0.2.10   # 可选：报文内 EAP IPv4
-# udp_ip: 192.0.2.10   # 可选：报文内 UDP IPv4
-```
+3. 用编辑器创建名为 `password` 的文件，仅写一行密码，保存为不带 BOM 的 UTF-8。Linux 上限制其权限：
 
-这里的文档示例地址不能直接用于校园认证。`ip` 用于选择实际本地地址，`eap_ip` / `udp_ip` 只改变协议载荷，不改变路由来源。显式的 `data.*` 设置优先于 profile 默认值。默认 DNS 与原版一致，`--dns IP[:PORT]` 可重复覆盖。完整字段见 [config.example.yml](src/default_config.yml)。
+   ```sh
+   chmod 600 password
+   ```
 
-### 无线门户
+   Windows 上将配置放在当前用户的私有目录；需要自动保存密码时，推荐使用 GUI。不要把密码放入命令行或环境变量。
 
-`mode: portal` 为独立 provider，不依赖原始以太网。显式配置可信门户地址、AC 和客户端地址，只有服务器在线列表确认本机已上线才报告成功。禁止把密码转发到跳转出的其他主机。官方部分门户使用明文 HTTP，必须显式启用 `--allow-insecure-portal`，这不能保护密码在校园网络上的传输；HTTPS 不会自动降级。详情及模拟服务器测试见[无线门户文档](docs/portal.md)。
+4. 检查配置和有线抓包条件，再启动认证：
 
-### Windows GUI 和服务
+   ```sh
+   ./drcom4scut --config config.yml --check-config
+   ./drcom4scut doctor --interface eth0
+   ./drcom4scut run --config config.yml --status-file status.json
+   ```
 
-[drcom4scutGUI](https://github.com/SeaLoong/drcom4scutGUI) 3.0.0 是独立的 .NET 10 WPF 界面，支持多账号、托盘、登录启动、私有密码管道、诊断，以及 EAP+UDP、仅 EAP 和无线门户三种模式。界面包旁边需放置本核心 0.4.0+ 的 `drcom4scut.exe`；真实有线认证仍需 Npcap。
+   Linux 有线认证需由管理员运行，或由管理员授予所需抓包权限。`doctor` 不发送认证报文；它会报告网卡、IPv4 或驱动权限问题。配置检查通过也不表示学校已接受认证。
 
-无人值守运行可使用[Windows SCM 服务](docs/windows-service.md)。服务安装/启动/停止/查询/卸载均为显式管理员操作，凭据配置和程序必须预先位于受保护目录，不把 GUI 的当前用户 DPAPI 密文直接拿给 LocalSystem 使用。
+默认有线模式同时执行 EAP 和 UDP。只需要 EAP 时，在配置中设置 `no_udp: true` 或运行时添加 `--no-udp`。有线报文配置默认即可，一般无需设置 `profile`；只有已知服务端有特定兼容要求时，才按[高级配置说明](docs/configuration.md#有线报文兼容选项)调整，它与本机运行 Windows 或 Linux 无关。
 
-## 构建、测试和 CI
+## 日常使用
 
-`rust-toolchain.toml` 使用 stable，最低 Rust 1.99。本次验证为 Rust 1.99.1。旧的 `is_global()` 仍是不稳定 API，已经替换其用法；不需要 `RUSTC_BOOTSTRAP`。
+`run` 可以省略。程序会在认证失败或网卡地址变化后尝试重连；同一网卡上请只运行一个认证客户端。
 
-```sh
-cargo build --locked --release
-cargo fmt --all -- --check
-cargo clippy --locked --all-targets --all-features -- -D warnings
-cargo clippy --locked --all-targets --no-default-features -- -D warnings
-cargo test --locked
-cargo test --locked --no-default-features
-```
+| 操作 | 命令 |
+| --- | --- |
+| 正常运行并记录状态 | `./drcom4scut --config config.yml --status-file status.json` |
+| 查看上述状态文件 | `./drcom4scut status --status-file status.json` |
+| 查看最近 200 行本地日志 | `./drcom4scut logs --config config.yml` |
+| 关闭文件日志 | `./drcom4scut --config config.yml --no-log` |
+| 测试一次认证流程并退出（不持续保活） | `./drcom4scut --config config.yml --once` |
+| 查看全部参数 | `./drcom4scut --help` |
 
-默认特性包括文件日志及支持 HTTPS 的门户。`--no-default-features` 可构建有线精简版；`--no-default-features --features log4rs,portal` 为纯 Rust 静态路由器构建，支持需显式许可的 HTTP 门户，不包含 HTTPS 门户能力。`portal-tls` 使用正常证书校验，原生构建需要 C 工具链。Windows 编译需要官方 Npcap SDK 1.15 的 `Packet.lib`、`wpcap.lib`，设置 `LIB` 和 `LIBPCAP_LIBDIR`。MSVC 通过 `build.rs` 延迟加载驱动 DLL，以便无驱动时也能执行帮助、版本和不抓包的测试。
+在运行窗口按 Ctrl-C 可停止并尝试注销。Linux 的 SIGTERM 和服务管理器停止也会触发清理。需要单独发送有线注销时，可使用 `./drcom4scut --config config.yml --logoff --interface eth0`。
 
-[CI 平台清单](.github/scripts/platforms.json) 是构建和发布的共同来源，包含 GNU、Windows 及五种静态 OpenWrt 架构。ARMv5TE/ARMv7/RISC-V 使用 QEMU 实际执行测试；原生 Linux/Windows runner 执行对应测试。打包前检查真实 ELF/PE、CPU/ABI/静态属性、版本和文件集合，避免把宿主二进制改名冒充其他架构。
+状态中的 `online` 表示所选认证模式已完成：EAP + UDP 模式需要 UDP 在线确认，仅 EAP 模式只检查 EAP。完整模式的 UDP 心跳重试耗尽时会暂时下线并继续恢复 UDP，健康的 EAP 会话会保留。`online` 不是对任意互联网地址的连通性保证。读取状态时也要查看 `updated_at`，避免把旧文件当作当前连接。
 
-[测试说明](docs/development.md)区分协议单元、模拟 EAP、真实回环 UDP/DNS/门户、CLI 子进程、跨架构 QEMU 和实际校园网测试。前几类成功不能证明学校服务器已接受认证；真实校园网、Npcap 驱动及长期在线需要目标环境验证。
+## 无线、后台与路由器
 
-## 手动 Release
+- **无线门户**：设置 `mode: portal` 并使用学校实际的可信门户地址，见[无线登录指南](docs/portal.md)。它与有线 EAP 是不同接入方式，不会自动切换。
+- **Windows GUI**：使用 [drcom4scutGUI](https://github.com/SeaLoong/drcom4scutGUI)，将核心程序 `drcom4scut.exe` 放在界面程序旁。支持多账号、托盘和按用户选择的登录启动；GUI 3.0.1 需要核心 0.4.1 或更高版本。
+- **Windows 无人值守运行**：见[后台服务部署](docs/windows-service.md)，由管理员安装和管理。
+- **OpenWrt 与 LuCI**：见[路由器安装、配置和管理](docs/openwrt.md)。现有预编译包不包括 MIPS/MIPSEL。
 
-先提交更新后的版本、源码和锁文件。工作流进入默认分支后，在 **Actions → Manual release → Run workflow** 选择待发布引用，填写与 `Cargo.toml` 一致的标签（本轮 `v0.4.0`）。默认创建草稿。
+## 常见问题
 
-流程重新运行测试和平台构建，核对全部包、SHA-256、版本、标签及提交后再创建 Release；不覆盖指向其他提交的标签或既有 Release。用户请求推送代码不等于执行发布，本轮只准备流程。
+| 现象 | 先检查 |
+| --- | --- |
+| 找不到网卡或 `capture=unavailable` | `--list-interfaces` 中的名称、网卡 IPv4、Npcap 或 Linux 抓包权限 |
+| 密码文件被拒绝 | 是否为单行 UTF-8 普通文件；Unix 权限是否为 `0600` / `0400`，且没有硬链接 |
+| EAP 成功但 UDP 无法上线 | 选中的有线网卡、本地 IPv4、校园 DNS 和 UDP 服务器；使用[配置参考](docs/configuration.md)核对参数 |
+| Portal 接受登录但仍未上线 | 门户地址、AC/客户端 IPv4、学校在线列表是否确认当前设备，见[门户排障](docs/portal.md#常见问题) |
+| `logs` 找不到日志 | 是否关闭了文件日志；`log.file_directory` 是否指向运行时实际目录 |
+| 断线后仍显示在线 | 状态文件是否属于正在运行的客户端，`updated_at` 是否已停止更新 |
 
-## 许可证与来源
+提交问题时请附程序版本、系统、模式和已脱敏的错误信息；不要上传账号配置、密码文件、认证抓包或完整私密日志。
 
-遵循仓库 [LGPL-3.0](LICENSE)。Cargo 元数据已与现有许可证文件保持一致。调研中的协议行为均有来源记录；未把没有许可证或 AGPL 客户端的实现代码混入本仓库。
+## 更多文档
+
+[配置参考](docs/configuration.md) · [OpenWrt](docs/openwrt.md) · [无线门户](docs/portal.md) · [Windows 服务](docs/windows-service.md) · [开发与构建](docs/development.md) · [更新记录](CHANGELOG.md)
+
+本项目使用 [LGPL-3.0-or-later](LICENSE)。协议和兼容性参考见[派生版本记录](docs/references-forks.md)与[相关客户端记录](docs/references-clients.md)。

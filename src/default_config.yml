@@ -1,4 +1,4 @@
-# drcom4scut 0.4.0: legacy values are preserved unless an option is set.
+# drcom4scut configuration. Leave optional fields empty to use their defaults.
 mode: eap
 interface:
 profile: legacy

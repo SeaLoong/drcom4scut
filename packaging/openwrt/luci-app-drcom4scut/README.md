@@ -1,31 +1,33 @@
-# LuCI administration package
+# SCUT DrCOM 的 LuCI 管理页
 
-This independently authored package uses the public [LuCI JavaScript APIs](https://openwrt.github.io/luci/jsapi/) and [rpcd executable plugin protocol](https://openwrt.org/docs/techref/rpcd). It does not copy source from other clients or AGPL LuCI applications. The source is covered by this repository's LGPL-3.0-or-later license.
+在 OpenWrt 的 **服务 → SCUT DrCOM** 中查看认证状态、启停和重新连接，设置专用服务的网络/配置路径，并下载脱敏诊断 JSON。近期事件显示分类和等级，完整本地日志由管理员通过 SSH 查看。
 
-The package provides connection status, start/stop/reconnect, safe categories for recent events, UCI service settings, and a JSON diagnostics download. Start/reconnect remain disabled until Enable is saved and applied; the backend also rejects disabled starts without changing the persistent setting. Stop remains available for an already-running process. It never reads password files or puts a password input in the browser. Accounts and passwords remain in the root-owned private core configuration/password files maintained through SSH.
+该页面不提供账号或密码输入框，也不读取密码文件。账号和密码仍由 root 在私有配置中维护。先完成[核心安装和账号配置](https://github.com/SeaLoong/drcom4scut/blob/master/docs/openwrt.md)，再安装页面；发布包根目录的 `OPENWRT.md` 也提供离线安装说明。
 
-Install the architecture-matched core and procd integration first. The LuCI package is architecture-independent; its rpcd helper supervises the fixed `/etc/init.d/drcom4scut` service and reads only `/var/run/drcom4scut/status.json`. It does not execute a path or command supplied by the browser.
+## 安装
 
-## SDK package build
-
-Within a matching OpenWrt SDK with the LuCI feed installed, copy this directory into `package/luci-app-drcom4scut` and build:
+路由器需已有 `luci-base`、`rpcd`、`jshn`、`logd`。在解压后的、架构匹配的核心发布包目录执行：
 
 ```sh
-make package/luci-app-drcom4scut/compile V=s
+sh openwrt/install-luci.sh
 ```
 
-The package depends on `luci-base`, `rpcd`, `jshn`, and `logd`. Install the resulting architecture-independent package (`.ipk` or `.apk`, as produced by that SDK) using the package manager for that OpenWrt release. See the parent OpenWrt installation guide for the optional source-asset installer when an SDK is unavailable. Reload rpcd/uhttpd, sign back into LuCI, then open **Services → SCUT DrCOM**. Preserve the existing authentication and HTTPS settings for LuCI; this application does not create anonymous access.
+脚本安装页面、菜单和专用 RPC，重启 rpcd 并重新加载可用的 uhttpd。重新登录 LuCI 后打开管理页。
 
-## Data and permission boundaries
+也可使用对应 OpenWrt SDK 构建页面包；命令及验证集中在[开发文档](https://github.com/SeaLoong/drcom4scut/blob/master/docs/development.md#luci-页面包)。页面包为 `Architecture: all`，不包含认证程序；核心仍必须匹配 CPU/ABI。
 
-The `luci-app-drcom4scut` ACL permits only its own UCI namespace and six fixed `drcom4scut` methods. There are no `file`, generic `exec`, wildcard ubus, or credential-read grants. A LuCI account granted write access can control this service and its dedicated configuration paths. Those paths are confined to direct files in the root-private `/etc/drcom4scut` directory by the procd service.
+## 使用
 
-Status is limited to known phase/version/interface/time fields and booleans. Diagnostics additionally omit process identifiers and interface/IP/MAC/account information. Recent logs contain only allowlisted event categories and levels: arbitrary client/server message text is not sent to the browser. This avoids guessing which unstructured server text might contain credentials. Full messages remain available to an administrator through the router's system log.
+1. 核对逻辑网络、可选物理网卡，以及 `/etc/drcom4scut/` 下的配置和密码文件路径。
+2. 勾选启用，点击“保存并应用”。
+3. 点击启动或重新连接；页面显示当前阶段与更新时间。需要结束已有进程时使用停止。
 
-## Validation
+尚未启用、或修改尚未保存应用时，启动与重连按钮不可用；停止仍可用于已有进程。路径及文件权限仍会在后端启动时检查，不能仅靠浏览器中的字段值判断可运行。
 
-```sh
-python3 -m unittest discover -s packaging/openwrt/luci-app-drcom4scut/tests -v
-```
+## 访问与诊断
 
-Tests execute the RPC allowlist rejection paths, shell sanitizers, and the authored JavaScript view against LuCI API fixtures. They check credential exclusion, path confinement, unknown fields, and diagnostic export. Shell/JSON/JavaScript syntax is validated. These tests are not a native OpenWrt/rpcd browser run; package installation, routing, and campus authentication still need validation on the target router.
+使用现有 LuCI 登录和 HTTPS 设置。页面的 RPC 权限仅用于此服务、专用 UCI 设置和固定操作，不授予通用文件读取或任意命令执行。配置与密码须是 root 私有目录中的直接文件，详见[路径要求](https://github.com/SeaLoong/drcom4scut/blob/master/docs/openwrt.md#安装与账号配置)。
+
+诊断下载不包含账号密码、原始服务端回显或完整日志文本。分享前仍应检查内容；真实浏览器、rpcd/procd、网卡和校园网组合需在目标设备验证。开发测试和权限检查见[测试说明](https://github.com/SeaLoong/drcom4scut/blob/master/docs/development.md#测试层次)。
+
+本页面使用 [LuCI JavaScript API](https://openwrt.github.io/luci/jsapi/) 和 [rpcd 插件接口](https://openwrt.org/docs/techref/rpcd)，遵循 [LGPL-3.0-or-later](LICENSE)。

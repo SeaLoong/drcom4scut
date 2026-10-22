@@ -9,10 +9,7 @@ use crate::{
 use log::{error, info};
 use serde::Serialize;
 use std::{net::IpAddr, path::Path, sync::Arc, time::Duration};
-use tokio::{
-    sync::watch,
-    time::{Instant, sleep},
-};
+use tokio::{sync::watch, time::sleep};
 
 /// Retry delay grows only on consecutive failures and never exceeds its cap.
 #[derive(Debug)]
@@ -181,6 +178,7 @@ pub async fn run(settings: Settings, mut stop: watch::Receiver<bool>) -> Result<
         let udp_session = udp_supervisor(&settings, auth_rx.clone(), ready_tx, mac, ip);
         let mut established = false;
         let mut reported_online = false;
+        let mut connection_hooks = ConnectionHooks::new(&settings.hooks, &name, Some(ip));
         let monitor = async {
             let mut link_check = tokio::time::interval(Duration::from_secs(5));
             link_check.tick().await;
@@ -209,15 +207,9 @@ pub async fn run(settings: Settings, mut stop: watch::Receiver<bool>) -> Result<
                     established = true;
                 }
                 if online != reported_online {
-                    let command = if online {
-                        &settings.hooks.online
-                    } else {
-                        &settings.hooks.offline
-                    };
-                    let label = if online { "online" } else { "offline" };
                     tokio::select! {
                         _ = shutdown(&mut stop) => return Ok::<SessionEnd, String>(SessionEnd::Shutdown),
-                        result = crate::hooks::run(command, label, &name, Some(ip), settings.hooks.timeout) => { if let Err(error) = result { error!("{error}"); } }
+                        result = connection_hooks.transition(online) => { if let Err(error) = result { error!("{error}"); } }
                     }
                     reported_online = online;
                 }
@@ -250,19 +242,7 @@ pub async fn run(settings: Settings, mut stop: watch::Receiver<bool>) -> Result<
         // End the EAP borrow before issuing Logoff. The retained capture read is
         // finite on Unix and nonblocking on Windows; no old protocol task lives on.
         let _ = tokio::time::timeout(Duration::from_secs(1), process.logoff()).await;
-        write_status(&settings, "offline", &name, Some(ip), false, false)?;
-        if reported_online
-            && let Err(error) = crate::hooks::run(
-                &settings.hooks.offline,
-                "offline",
-                &name,
-                Some(ip),
-                settings.hooks.timeout,
-            )
-            .await
-        {
-            error!("{error}");
-        }
+        connection_hooks.finish(&settings).await?;
         match outcome? {
             SessionEnd::Completed | SessionEnd::Shutdown => return Ok(()),
             _ if settings.once => return Err("Authentication did not complete".into()),
@@ -288,6 +268,71 @@ enum SessionEnd {
     Eap(State),
 }
 
+/// Register online side effects before awaiting the command. Dropping a
+/// transition on shutdown must still leave enough state to run its paired hook.
+struct ConnectionHooks<'a> {
+    hooks: &'a crate::hooks::Hooks,
+    interface: &'a str,
+    ip: Option<IpAddr>,
+    active: bool,
+}
+
+impl<'a> ConnectionHooks<'a> {
+    fn new(hooks: &'a crate::hooks::Hooks, interface: &'a str, ip: Option<IpAddr>) -> Self {
+        Self {
+            hooks,
+            interface,
+            ip,
+            active: false,
+        }
+    }
+
+    async fn transition(&mut self, online: bool) -> Result<(), String> {
+        if online {
+            self.active = true;
+        }
+        let (command, label) = if online {
+            (&self.hooks.online, "online")
+        } else {
+            (&self.hooks.offline, "offline")
+        };
+        let result =
+            crate::hooks::run(command, label, self.interface, self.ip, self.hooks.timeout).await;
+        if !online {
+            self.active = false;
+        }
+        result
+    }
+
+    async fn cleanup(&mut self) -> Result<(), String> {
+        if !self.active {
+            return Ok(());
+        }
+        // The host allows three seconds total. EAP Logoff uses at most one;
+        // this hook gets one more, leaving room to return a normal shutdown.
+        let result = crate::hooks::run(
+            &self.hooks.offline,
+            "offline",
+            self.interface,
+            self.ip,
+            self.hooks.timeout.min(1),
+        )
+        .await;
+        self.active = false;
+        result
+    }
+
+    async fn finish(&mut self, settings: &Settings) -> Result<(), String> {
+        // Publishing status can fail after login (removed directory, full disk,
+        // etc.). It must not prevent cleanup of earlier hook side effects.
+        let status = write_status(settings, "offline", self.interface, self.ip, false, false);
+        if let Err(error) = self.cleanup().await {
+            error!("{error}");
+        }
+        status
+    }
+}
+
 async fn udp_supervisor(
     settings: &Settings,
     mut auth: watch::Receiver<ChannelData>,
@@ -302,8 +347,7 @@ async fn udp_supervisor(
                 return;
             }
         }
-        let started = Instant::now();
-        let state = match socket::resolve_dns_from(settings, source).await {
+        let (state, was_ready) = match socket::resolve_dns_from(settings, source).await {
             Some((server, dns)) => match socket::socket_bind_from(
                 server,
                 source,
@@ -322,16 +366,17 @@ async fn udp_supervisor(
                         dns,
                     )
                     .with_ready(ready.clone());
-                    process.start().await
+                    let state = process.start().await;
+                    (state, process.has_been_ready())
                 }
                 None => {
                     error!("Cannot bind UDP socket to selected interface address {source}");
-                    State::Quit
+                    (State::Quit, false)
                 }
             },
             None => {
                 error!("Cannot resolve {} using selected interface", settings.host);
-                State::Stop
+                (State::Stop, false)
             }
         };
         ready.send_replace(false);
@@ -339,7 +384,9 @@ async fn udp_supervisor(
         if settings.once {
             return;
         }
-        if started.elapsed() >= Duration::from_secs(settings.heartbeat.udp_timeout as u64) {
+        // Time spent timing out during DNS or the initial handshake is still a
+        // consecutive failure. Only an established UDP session starts a new series.
+        if was_ready {
             backoff.reset();
         }
         if state == State::Sleep {
@@ -367,7 +414,8 @@ async fn run_portal(settings: &Settings, mut stop: watch::Receiver<bool>) -> Res
         )?;
         return Ok(());
     }
-    let mut online_hook_active = false;
+    let mut connection_hooks = ConnectionHooks::new(&settings.hooks, "portal", current_ip);
+    let mut cleanup_logout_allowed = true;
     let outcome = {
         let session = async {
             let mut backoff = Backoff::new(settings.reconnect, settings.reconnect_max);
@@ -382,20 +430,13 @@ async fn run_portal(settings: &Settings, mut stop: watch::Receiver<bool>) -> Res
                 )?;
                 match client.login(&settings.username, &settings.password).await {
                     Ok(status) if status.online => {
+                        cleanup_logout_allowed = true;
                         current_ip = Some(status.client_ip.into());
                         info!("Portal authorization confirmed online.");
-                        write_status(settings, "online", "portal", current_ip, true, true)?;
+                        write_status(settings, "online", "portal", current_ip, false, true)?;
                         backoff.reset();
-                        online_hook_active = true;
-                        if let Err(error) = crate::hooks::run(
-                            &settings.hooks.online,
-                            "online",
-                            "portal",
-                            current_ip,
-                            settings.hooks.timeout,
-                        )
-                        .await
-                        {
+                        connection_hooks.ip = current_ip;
+                        if let Err(error) = connection_hooks.transition(true).await {
                             error!("{error}");
                         }
                         if settings.once {
@@ -403,29 +444,26 @@ async fn run_portal(settings: &Settings, mut stop: watch::Receiver<bool>) -> Res
                         }
                         loop {
                             sleep(Duration::from_secs(settings.heartbeat.udp_timeout as u64)).await;
-                            match client.check_status().await {
+                            match client.check_status_for(&settings.username).await {
                                 Ok(current) if current.online => {
                                     current_ip = Some(current.client_ip.into());
                                     write_status(
-                                        settings, "online", "portal", current_ip, true, true,
+                                        settings, "online", "portal", current_ip, false, true,
                                     )?;
+                                }
+                                Err(crate::portal::PortalError::AccountMismatch) => {
+                                    cleanup_logout_allowed = false;
+                                    error!("Portal session belongs to a different account.");
+                                    break;
                                 }
                                 _ => break,
                             }
                         }
                         write_status(settings, "offline", "portal", current_ip, false, false)?;
-                        if let Err(error) = crate::hooks::run(
-                            &settings.hooks.offline,
-                            "offline",
-                            "portal",
-                            current_ip,
-                            settings.hooks.timeout,
-                        )
-                        .await
-                        {
+                        connection_hooks.ip = current_ip;
+                        if let Err(error) = connection_hooks.transition(false).await {
                             error!("{error}");
                         }
-                        online_hook_active = false;
                     }
                     Ok(_) => {
                         if settings.once {
@@ -434,6 +472,9 @@ async fn run_portal(settings: &Settings, mut stop: watch::Receiver<bool>) -> Res
                         error!("Portal authentication could not be confirmed online.");
                     }
                     Err(error) => {
+                        if matches!(error, crate::portal::PortalError::AccountMismatch) {
+                            cleanup_logout_allowed = false;
+                        }
                         // PortalError is a fixed category and never retains a
                         // request URL, response text or credentials.
                         if settings.once {
@@ -456,20 +497,11 @@ async fn run_portal(settings: &Settings, mut stop: watch::Receiver<bool>) -> Res
     // check, a retry delay or a lifecycle hook equally. The operation future has
     // already been dropped, so its pending HTTP request/hook is canceled first.
     if !matches!(outcome, Ok(true)) {
-        let _ = tokio::time::timeout(Duration::from_secs(1), client.logout()).await;
-        write_status(settings, "offline", "portal", current_ip, false, false)?;
-        if online_hook_active
-            && let Err(error) = crate::hooks::run(
-                &settings.hooks.offline,
-                "offline",
-                "portal",
-                current_ip,
-                settings.hooks.timeout.min(1),
-            )
-            .await
-        {
-            error!("{error}");
+        if cleanup_logout_allowed {
+            let _ = tokio::time::timeout(Duration::from_secs(1), client.logout()).await;
         }
+        connection_hooks.ip = current_ip;
+        connection_hooks.finish(settings).await?;
     }
     outcome.map(|_| ())
 }
@@ -508,5 +540,193 @@ mod tests {
         for secret in ["password", "username", "md5", "challenge"] {
             assert!(!text.contains(secret));
         }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn long_failed_udp_handshakes_still_increase_reconnect_backoff() {
+        let server = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let mut settings = Settings {
+            host: "127.0.0.1".into(),
+            dns: vec!["127.0.0.1:53".parse().unwrap()],
+            local_port: 0,
+            server_port: server.local_addr().unwrap().port(),
+            reconnect: 2,
+            reconnect_max: 8,
+            ..Default::default()
+        };
+        // Each failed handshake takes longer than the heartbeat period. That
+        // elapsed time must not be mistaken for having authenticated online.
+        settings.retry.count = 0;
+        settings.retry.interval = 5_000;
+        settings.heartbeat.udp_timeout = 1;
+        let (_auth, auth) = watch::channel(ChannelData {
+            state: State::Success,
+            data: vec![0; 16],
+        });
+        let (ready, mut readiness) = watch::channel(false);
+        let task = tokio::spawn(async move {
+            udp_supervisor(
+                &settings,
+                auth,
+                ready,
+                pnet::datalink::MacAddr::new(2, 0, 0, 0, 0, 1),
+                "127.0.0.1".parse().unwrap(),
+            )
+            .await;
+        });
+
+        // Keep ordinary loopback I/O independent of paused-time auto-advance.
+        // The bounded yield loop drives the runtime's I/O driver while keeping
+        // a runnable task; only explicit advances below move the virtual clock.
+        async fn receive_alive(server: &tokio::net::UdpSocket) {
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            let mut bytes = [0; 64];
+            loop {
+                match server.try_recv_from(&mut bytes) {
+                    Ok((length, _)) => {
+                        assert_eq!(length, 8);
+                        assert_eq!(&bytes[..4], &[7, 0, 8, 0]);
+                        return;
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => (),
+                    Err(error) => panic!("loopback receive failed: {error}"),
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "UDP handshake was not sent"
+                );
+                tokio::task::yield_now().await;
+            }
+        }
+        async fn failure_reported(readiness: &mut watch::Receiver<bool>) {
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            while !readiness.has_changed().unwrap() {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "UDP failure was not observed"
+                );
+                tokio::task::yield_now().await;
+            }
+            assert!(!*readiness.borrow_and_update());
+        }
+
+        let start = tokio::time::Instant::now();
+        receive_alive(&server).await;
+        assert_eq!(start.elapsed(), Duration::ZERO);
+        readiness.borrow_and_update();
+        for (backoff, elapsed) in [(2, 7), (4, 16)] {
+            tokio::time::advance(Duration::from_secs(5)).await;
+            failure_reported(&mut readiness).await;
+            tokio::time::advance(Duration::from_secs(backoff)).await;
+            receive_alive(&server).await;
+            assert_eq!(start.elapsed(), Duration::from_secs(elapsed));
+            readiness.borrow_and_update();
+        }
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn cancelling_an_online_hook_still_runs_its_paired_offline_command() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static NEXT_FILE: AtomicUsize = AtomicUsize::new(0);
+        let path = std::env::temp_dir().join(format!(
+            "drcom-hook-pair-{}-{}",
+            std::process::id(),
+            NEXT_FILE.fetch_add(1, Ordering::SeqCst)
+        ));
+        let hooks = crate::hooks::Hooks {
+            online: vec![
+                "/bin/sh".into(),
+                "-c".into(),
+                "printf '%s\\n' \"$DRCOM_STATE\" >> \"$1\"; exec /bin/sleep 30".into(),
+                "hook".into(),
+                path.to_string_lossy().into_owned(),
+            ],
+            offline: vec![
+                "/bin/sh".into(),
+                "-c".into(),
+                "printf '%s\\n' \"$DRCOM_STATE\" >> \"$1\"".into(),
+                "hook".into(),
+                path.to_string_lossy().into_owned(),
+            ],
+            timeout: 30,
+        };
+        let mut connection = ConnectionHooks::new(&hooks, "eth-test", None);
+        {
+            let transition = connection.transition(true);
+            tokio::pin!(transition);
+            tokio::select! {
+                result = &mut transition => panic!("online command must still be running: {result:?}"),
+                observed = tokio::time::timeout(Duration::from_secs(5), async {
+                    loop {
+                        if std::fs::read_to_string(&path).is_ok_and(|text| text == "online\n") { break; }
+                        sleep(Duration::from_millis(10)).await;
+                    }
+                }) => observed.expect("online side effect was not observed"),
+            }
+            // The monitor drops this future when stop is received. The process
+            // has already changed external state, but has not completed.
+        }
+        connection.cleanup().await.unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "online\noffline\n");
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn slow_offline_hook_cannot_consume_the_hosts_entire_shutdown_budget() {
+        let hooks = crate::hooks::Hooks {
+            offline: vec!["/bin/sleep".into(), "30".into()],
+            timeout: 30,
+            ..Default::default()
+        };
+        let mut connection = ConnectionHooks::new(&hooks, "eth-test", None);
+        connection.transition(true).await.unwrap();
+        // Include the full one-second EAP Logoff budget before hook cleanup;
+        // both phases must finish within the console host's three-second limit.
+        let result = tokio::time::timeout(Duration::from_secs(3), async {
+            sleep(Duration::from_secs(1)).await;
+            connection.cleanup().await
+        })
+        .await
+        .expect("cleanup exceeded the host shutdown budget");
+        assert_eq!(result.unwrap_err(), "Lifecycle hook timed out");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn failed_status_publication_does_not_skip_the_offline_side_effect() {
+        let directory =
+            std::env::temp_dir().join(format!("drcom-status-cleanup-{}", std::process::id()));
+        std::fs::create_dir(&directory).unwrap();
+        let status_path = directory.join("status.json");
+        let marker = directory.with_extension("offline-marker");
+        let settings = Settings {
+            status_file: Some(status_path.clone()),
+            ..Default::default()
+        };
+        let hooks = crate::hooks::Hooks {
+            offline: vec![
+                "/bin/sh".into(),
+                "-c".into(),
+                "printf '%s\\n' \"$DRCOM_STATE\" > \"$1\"".into(),
+                "hook".into(),
+                marker.to_string_lossy().into_owned(),
+            ],
+            ..Default::default()
+        };
+        let mut connection = ConnectionHooks::new(&hooks, "eth-test", None);
+        connection.transition(true).await.unwrap();
+        write_status(&settings, "online", "eth-test", None, true, true).unwrap();
+        std::fs::remove_file(&status_path).unwrap();
+        std::fs::remove_dir(&directory).unwrap();
+        assert_eq!(
+            connection.finish(&settings).await.unwrap_err(),
+            "Cannot create private status file"
+        );
+        assert_eq!(std::fs::read_to_string(&marker).unwrap(), "offline\n");
+        std::fs::remove_file(marker).unwrap();
     }
 }

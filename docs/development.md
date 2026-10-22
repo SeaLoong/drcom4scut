@@ -1,50 +1,115 @@
-# 0.4.0 开发、架构与验证
+# 开发、构建与验证
 
-## 开发入口
+本页面向源码开发者，命令均在源码仓库根目录执行。使用 `rust-toolchain.toml` 选择的 stable Rust，最低版本见 `Cargo.toml` 的 `rust-version`（当前为 1.99）。维护依赖时同步提交 `Cargo.lock`；普通构建、检查和 CI 使用 `--locked`。开发协作约定见 [AGENTS.md](https://github.com/SeaLoong/drcom4scut/blob/master/AGENTS.md)，用户操作入口见 [README](../README.md)。
 
-使用已有 checkout 和 `rust-toolchain.toml` 的 stable 工具链。任务环境已经隔离，不创建额外 worktree，除非用户明确要求。依赖升级必须同步 `Cargo.lock`，平时使用 `--locked`。命令、特性和平台清单见 [README](../README.md)。
+## 本机构建与检查
 
-## 运行模型
+在仓库根目录运行：
 
-- EAP 和 UDP 分别由单个 Tokio future 拥有状态；`watch` 保留最新授权和完整 UDP 在线状态。EAP 成功不能代替 UDP 在线。
-- `client::run` 统一管理网络变化、退避、在线状态、hooks 和清理；Windows SCM、控制台和 GUI 控制通道共用这一生命周期。
-- DNS 和 DrCOM UDP 绑定真实本地 IPv4。Linux 使用 `SO_BINDTODEVICE`，Windows 使用 `IP_UNICAST_IF`，拒绝歧义接口。报文中的 `eap_ip` / `udp_ip` 与传输源地址分开。
-- 未固定 `ip` 时，每五秒检查所选网卡的地址；DHCP 地址消失/变化时先注销并重建会话。固定 `ip` 的配置由用户负责维护。
-- Unix pnet 的阻塞收发隔离在有限超时的适配层；取消中的读取被保留并复用，不重复排队或丢弃已收到的帧。Windows 使用非阻塞 pcap，避免 pnet 忽略读取超时导致退出挂起。
-- Windows 通过 IP Helper 枚举网卡、IPv4 和状态，列出网卡及无线 Portal 不依赖 Npcap。抓包前从受信系统目录加载 Npcap，缺少驱动时返回诊断错误；MSVC 延迟加载允许无驱动执行帮助、版本和不抓包测试。
-- GUI 密码只使用 EOF 分帧的私有 stdin；独立随机命名管道只允许固定 `stop\n` 或父进程 EOF。GUI 先请求有界清理，超时才终止所属进程树，不杀其他客户端。
-- Portal 为独立 provider。HTTP 必须明确允许，HTTPS 不降级；入口只接受公开网关元数据，不能保存带账号/密码/token 的登录 URL。只有本机 IP 以及已知 MAC 均匹配在线列表才算成功。
+```sh
+cargo build --locked --release
+cargo fmt --all -- --check
+cargo clippy --locked --all-targets --all-features -- -D warnings
+cargo clippy --locked --all-targets --no-default-features -- -D warnings
+cargo test --locked
+cargo test --locked --no-default-features
+./target/release/drcom4scut --version
+```
 
-`legacy` 报文保持原格式；`windows31` 是显式的另一配置。测试用独立固定字节、校验和和协议录制行为对照，不把某个模拟服务器通过等同于真实校园接受。
+默认构建的 HTTPS 后端需要平台 C 工具链。Windows x64 还需 [Npcap SDK 1.15](https://npcap.com/dist/npcap-sdk-1.15.zip) 中的 `Lib/x64/Packet.lib`、`Lib/x64/wpcap.lib`；将该目录加入 `LIB`，并设置 `LIBPCAP_LIBDIR`。CI 使用[固定 SDK 安装步骤](https://github.com/SeaLoong/drcom4scut/blob/master/.github/actions/setup-npcap/action.yml)，保留正常 TLS 校验。MSVC 在 `build.rs` 中延迟加载捕获 DLL；真实抓包仍需安装 Npcap。
 
-## 验证层次
+## 构建特性
 
-| 层次 | 验证内容 | 运行环境 |
+| 特性集合 | 命令参数 | 能力 |
 | --- | --- | --- |
-| 协议单元 | 字段、端序、长度、校验和、畸形/截断、两个 profile | 普通用户 |
-| EAP 状态机 | 完整认证、任意初始标识符、组播心跳、重认证、超时、取消 | 模拟以太网、虚拟时钟 |
-| Socket/UDP | 真实回环 DNS/UDP、源绑定、启动心跳、重试、丢包及 EAP 隔离 | 本机 loopback |
-| Portal | 真实回环 HTTP、JSONP、会话归属、跳转/URL拒绝、源绑定 | 本机 loopback |
-| CLI | 实际子进程、私有 stdin/文件、模式覆盖、注销、SIGTERM、状态/hooks | 普通用户 |
-| Windows 安全策略 | SCM 文件/祖先所有者、ACL、null DACL、密码源、重解析点；DPAPI及管道 | Windows runner；部分规则可在其他平台测 |
-| OpenWrt 集成 | procd/UCI、私有路径、LuCI ACL/后端、安装器、ELF/ABI和归档 | rootless fixtures、Node、Python |
-| 其他 CPU | 相同 Rust 测试及 CLI 子进程、发布程序 `--version` | 原生或 QEMU |
-| 真实网络 | 校园认证、驱动实际工作、长时间在线、物理拔插和路由器浏览器 | 目标网卡、系统、网络和账号 |
+| 默认 | 无附加参数 | 文件日志、有线 EAP/UDP、HTTP 与 HTTPS Portal |
+| 精简 | `--no-default-features` | 有线 EAP/UDP、控制台日志 |
+| 路由器 | `--no-default-features --features log4rs,portal` | 文件日志、有线认证、显式允许的 HTTP Portal |
+| HTTPS 门户 | `--features portal-tls` | 启用 `portal` 及证书校验；交叉编译需匹配的 TLS C/汇编工具链 |
 
-QEMU 不能替代真实路由器驱动、netifd、LuCI 浏览器和校园交换机测试。Windows 交叉 `cargo check` 也不能替代原生运行；Linux 上 DPAPI 测试应明确标为跳过，而非通过。
+HTTP-only 产物会拒绝 HTTPS，不能用关闭证书校验或静默降级代替 TLS 支持。`log4rs` 只启用实际使用的日志 appender/编码/滚动功能，不需要其 YAML 配置解析器。
 
-跨架构测试中 `CARGO_TARGET_*_RUNNER` 只处理测试主程序；CLI 子进程另用 `DRCOM_TEST_RUNNER` 启动对应 QEMU。临时目录计数使用 `AtomicUsize`，不假设 ARMv5 支持 64 位原子。并发/取消测试使用门闩或虚拟时钟，不用依赖主机调度的毫秒竞速。
+## 模块与运行模型
 
-## 构建与发布
+- `settings` 解析 CLI/YAML、密码源、模式和报文字段；`main` 提供检查、管理命令与退出信号入口。
+- `client` 统一管理认证会话、网卡变化、退避、状态、hooks 和清理。EAP 与 UDP 由各自的 Tokio future 持有状态，`watch` 保留最近授权结果，UDP 完成握手后才上报完整在线。
+- `device` 隔离抓包接口。Unix 将 pnet 阻塞收发放在有限超时的适配层；取消中的读取保留复用。Windows 使用非阻塞 pcap，并通过原生 IP Helper 枚举网卡，使列举与 Portal 不依赖捕获驱动。
+- `socket` 为 DNS/UDP 选择真实本地 IPv4 和出口接口。载荷里的 `eap_ip` / `udp_ip` 与实际源地址分离。未固定 `ip` 的会话周期检查地址变化。
+- `portal` 处理显式选择的 ePortal 接入、同主机约束、响应解析和在线会话确认。`control` 提供 GUI 私有停止通道；`service` 对接 Windows SCM。
 
-`.github/scripts/platforms.json` 驱动七目标 CI 和发布完整性检查。五种静态 OpenWrt 构建使用 `log4rs,portal`，不引入需要交叉 C 工具链的 TLS provider；原生 GNU/Windows 默认构建包含 `portal-tls`。架构、feature 与检查命令不能通过重新命名产物替代。
+有线 `legacy` 与 `windows31` 共用 EAP Start、Identity、MD5、Success 的基本过程；后者改变部分扩展字段和 MiscInfo，并增加一次 UDP 启动心跳确认。Identity 扩展仍相同，周期心跳相同。报文参数与依据分别见[配置参考](configuration.md#有线报文兼容选项)及[客户端参考](references-clients.md)。
 
-打包检查版本、ELF/PE机器类型、位宽、端序、静态属性、ARM CPU基线与 ABI。发布包包含程序、配置示例、文档/许可证及相应 OpenWrt 集成资源，SHA-256 在最终发布前再次核对。
+## 测试层次
 
-普通 CI 和手动 Release 复用验证工作流。只有最后发布 job 有写权限；标签必须匹配 manifest 与已验证提交，不强推/覆盖标签，不覆盖现有 Release。Git 推送触发 CI，不等于用户要求执行 Release。
+| 范围 | 覆盖内容 | 运行条件 |
+| --- | --- | --- |
+| 协议 | 固定字节、长度、端序、校验和、截断/乱序、两种报文配置 | 普通用户 |
+| EAP 状态机 | 任意初始标识符、认证、组播心跳、重认证、重试、取消 | 模拟以太网及虚拟时钟 |
+| DNS/UDP | 真实 socket、源绑定、启动/周期心跳、丢包、EAP 状态变化 | 本机 loopback |
+| Portal | HTTP/TLS、JSONP、会话归属、地址/跳转约束、超时与注销 | 本机模拟服务器 |
+| CLI/生命周期 | 真实子进程、私有密码输入、状态、hooks、信号退出 | 普通用户 |
+| Windows 策略 | 服务 ACL、所有者、父路径、外部密码源、无驱动枚举 | Windows runner |
+| OpenWrt | procd/UCI、私有路径、LuCI JS/RPC、安装、ABI 与归档 | Shell、Python、Node fixtures |
+| 其他 CPU | 相同协议与子进程测试，发布二进制版本检查 | 对应硬件或 QEMU |
 
-Windows SDK 通过正常 TLS 从官方固定版本地址下载。测试不需要安装或绕过 Npcap 商业静默安装器。真实捕获仍必须安装官方驱动。
+测试应确认实际执行并完成，零测试、跳过和通过分别报告。Linux 不执行 Windows DPAPI；交叉 `cargo check` 不证明原生 Windows 行为。模拟认证、QEMU 和策略 fixtures 也不能代替校园交换机、实际 Npcap、路由器网卡、LuCI 浏览器或长期在线验证。
 
-## 持续提交
+并发测试通过门闩或虚拟时钟安排事件，不依赖主机在几毫秒内调度。ARMv5 测试不得假设存在 64 位原子。跨架构时 `CARGO_TARGET_*_RUNNER` 只启动测试主程序，CLI 子进程另需 `DRCOM_TEST_RUNNER`。
 
-用户已要求每轮完成的改动都提交并推送两个仓库的 `master`。先完成适当检查，使用正常快进推送；遇到远端更新先保留本地工作并合并/重放、验证冲突，不强制覆盖。不得提交账号、密码文件、真实配置、诊断私密数据或构建缓存。
+独立脚本检查可在仓库根目录运行：
+
+```sh
+python3 -m unittest discover -s .github/scripts/tests -v
+python3 -m unittest discover -s packaging/openwrt/luci-app-drcom4scut/tests -v
+```
+
+Windows 原生服务策略检查：
+
+```powershell
+powershell -NoProfile -NonInteractive -File scripts/test-service-acl.ps1
+```
+
+## OpenWrt 交叉构建
+
+当前发布平台和特性以 [platforms.json](https://github.com/SeaLoong/drcom4scut/blob/master/.github/scripts/platforms.json) 为准。静态路由器产物使用 Rust 分发中的 self-contained musl 和 `rust-lld`；例如 ARMv7：
+
+```sh
+rustup target add armv7-unknown-linux-musleabi
+RUSTFLAGS='-C linker=rust-lld -C target-feature=+crt-static' \
+  cargo build --locked --release --target armv7-unknown-linux-musleabi \
+    --no-default-features --features log4rs,portal
+DRCOM_TEST_RUNNER=qemu-arm \
+CARGO_TARGET_ARMV7_UNKNOWN_LINUX_MUSLEABI_RUNNER=qemu-arm \
+RUSTFLAGS='-C linker=rust-lld -C target-feature=+crt-static' \
+  cargo test --locked --target armv7-unknown-linux-musleabi \
+    --no-default-features --features log4rs,portal
+python3 .github/scripts/package_release.py armv7-unknown-linux-musleabi --runner qemu-arm
+```
+
+安装对应 QEMU user-mode 程序后执行测试。GNU/Windows 使用本机 runner，ARMv5TE、ARMv7 和 RISC-V 交叉目标通过 QEMU 执行。没有提供当前稳定工具链可构建、可测试的 MIPS/MIPSEL 发布目标；平台清单中的产物也不等于任意路由器型号已通过实网验证。
+
+## LuCI 页面包
+
+在对应 OpenWrt SDK 中，将 `packaging/openwrt/luci-app-drcom4scut/` 复制为 `package/luci-app-drcom4scut/`，保留其中的许可证文件，安装 SDK 自带的 LuCI feed，然后运行：
+
+```sh
+make package/luci-app-drcom4scut/compile V=s
+```
+
+SDK 按其发行版生成 `.ipk` 或 `.apk`。该包只包含 JS、Shell、JSON 等页面资源，依赖 `luci-base`、`rpcd`、`jshn`、`logd`，使用 `Architecture: all`；它不构建或捆绑认证二进制。Shell/JS/API fixtures 的测试见上文，SDK 包安装和真实浏览器交互仍需在对应固件验证。
+
+## CI 与打包
+
+[Rust CI](https://github.com/SeaLoong/drcom4scut/blob/master/.github/workflows/rust.yml) 在 push、pull request 或手动运行时调用[共用验证工作流](https://github.com/SeaLoong/drcom4scut/blob/master/.github/workflows/validate-build.yml)。它运行格式、两组严格 Clippy、默认/精简及目标特性测试、平台构建和脚本回归。
+
+平台清单同时驱动构建矩阵、[打包器](https://github.com/SeaLoong/drcom4scut/blob/master/.github/scripts/package_release.py)和[发布完整性检查](https://github.com/SeaLoong/drcom4scut/blob/master/.github/scripts/verify_release.py)。Cargo 命令显式指定 target，打包前核对 ELF/PE、CPU、位宽、端序、静态属性、ARM 基线/ABI 和实际版本。包内包含程序、配置示例、文档、许可证及相应 OpenWrt 资源，并生成 SHA-256。
+
+## 手动发布
+
+1. 更新 `Cargo.toml`、相关打包元数据和 [CHANGELOG](../CHANGELOG.md)，提交源码及锁文件，确认普通 CI 结果。
+2. 在默认分支已有工作流的仓库中打开 **Actions → Manual release → Run workflow**，选择待发布引用，填写与 manifest 一致的标签，如 `v0.4.1`。
+3. `draft` 默认开启。保留它会创建草稿；取消后会直接发布。
+
+工作流重新执行共用验证、检查全部平台包与校验和，核对最终标签仍指向已验证提交，然后创建 Release。它拒绝覆盖其他提交的标签及既有 Release。只有最终发布 job 有写权限。普通 Git 推送仅触发 CI，不执行该手动发布流程。
+
+来源快照、许可证和协议证据见[派生仓库记录](references-forks.md)与[相关客户端记录](references-clients.md)。新增兼容行为应附独立报文样本或可重复的协议测试，并明确实机验证范围。

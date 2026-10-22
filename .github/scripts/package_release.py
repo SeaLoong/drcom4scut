@@ -91,8 +91,18 @@ def package(root, target, runner=(), target_dir=None):
         if (root / "CHANGELOG.md").is_file():
             shutil.copy2(root / "CHANGELOG.md", contents / "CHANGELOG.md")
         if platform["openwrt"]:
-            shutil.copytree(root / "packaging/openwrt", contents / "openwrt", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
-            shutil.copy2(root / "docs/openwrt.md", contents / "OPENWRT.md")
+            bundle = root / "packaging/openwrt"
+            for required in (
+                "files/config.yml", "files/drcom4scut.init", "files/drcom4scut.uci",
+                "install.sh", "install-common.sh", "install-luci.sh",
+            ):
+                if not (bundle / required).is_file():
+                    raise ValueError(f"OpenWrt bundle is missing an installation file: {required}")
+            shutil.copytree(bundle, contents / "openwrt", ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+            # Keep the old entry point without moving a document's relative links.
+            (contents / "OPENWRT.md").write_text(
+                "[OpenWrt 安装与使用](docs/openwrt.md)\n", encoding="utf-8"
+            )
         if platform["format"] == "pe":
             archive = dist / f"{stem}.zip"
             with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as output:

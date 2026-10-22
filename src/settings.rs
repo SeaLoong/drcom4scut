@@ -305,7 +305,16 @@ fn string(cfg: &Config, key: &str) -> Result<Option<String>, String> {
 }
 
 fn text(matches: &ArgMatches, cfg: &Config, key: &str) -> Result<Option<String>, String> {
-    if let Some(value) = matches.try_get_one::<String>(key).ok().flatten() {
+    text_from(matches, cfg, key, key)
+}
+
+fn text_from(
+    matches: &ArgMatches,
+    cfg: &Config,
+    cli: &str,
+    key: &str,
+) -> Result<Option<String>, String> {
+    if let Some(value) = matches.try_get_one::<String>(cli).ok().flatten() {
         return Ok(Some(value.clone()));
     }
     string(cfg, key)
@@ -424,15 +433,9 @@ impl Settings {
             _ => return Err("Invalid mode: expected eap or portal".into()),
         };
         settings.logoff = matches.get_flag("logoff");
-        settings.portal_base = matches
-            .get_one::<String>("portal-base")
-            .cloned()
-            .or(string(cfg, "portal.base_url")?)
+        settings.portal_base = text_from(matches, cfg, "portal-base", "portal.base_url")?
             .unwrap_or(settings.portal_base);
-        settings.portal_api = matches
-            .get_one::<String>("portal-api")
-            .cloned()
-            .or(string(cfg, "portal.api_url")?);
+        settings.portal_api = text_from(matches, cfg, "portal-api", "portal.api_url")?;
         settings.portal_allow_http = !matches.get_flag("require-https-portal")
             && (matches.get_flag("allow-insecure-portal")
                 || boolean(cfg, "portal.allow_http", false)?);
@@ -448,9 +451,11 @@ impl Settings {
             && (matches.get_flag("no-udp") || boolean(cfg, "no_udp", false)?);
         settings.no_log = matches.get_flag("no-log") || boolean(cfg, "no_log", false)?;
         settings.once = matches.get_flag("once") || boolean(cfg, "once", false)?;
-        settings.status_file = text(matches, cfg, "status-file")?
-            .or(string(cfg, "status_file")?)
-            .map(PathBuf::from);
+        settings.status_file = match text(matches, cfg, "status-file")? {
+            Some(value) => Some(value),
+            None => string(cfg, "status_file")?,
+        }
+        .map(PathBuf::from);
         settings.eap_ip = ipv4_option(matches, cfg, "eap-ip", "eap_ip")?;
         settings.udp_ip = ipv4_option(matches, cfg, "udp-ip", "udp_ip")?;
         settings.gateway = string(cfg, "gateway")?
@@ -498,6 +503,11 @@ impl Settings {
         settings.username = text(matches, cfg, "username")?.unwrap_or_default();
         if !settings.logoff && settings.username.trim().is_empty() {
             return Err("Username is REQUIRED; fill the configuration file".into());
+        }
+        if !settings.logoff && !valid_credential(&settings.username) {
+            return Err(
+                "Invalid username: expected one nonempty UTF-8 line of at most 4096 bytes".into(),
+            );
         }
         // Logout does not require account credentials. In particular, a portal
         // logout must not read an unrelated configured password file or stdin.
@@ -760,10 +770,7 @@ fn ipv4_option(
     cli: &str,
     key: &str,
 ) -> Result<Option<Ipv4Addr>, String> {
-    let value = matches
-        .get_one::<String>(cli)
-        .cloned()
-        .or(string(cfg, key)?);
+    let value = text_from(matches, cfg, cli, key)?;
     value
         .map(|value| {
             value
@@ -803,8 +810,12 @@ fn parse_dns(value: &str) -> Result<SocketAddr, String> {
     Ok(address)
 }
 
+pub(crate) fn valid_credential(value: &str) -> bool {
+    !value.is_empty() && value.len() <= 4096 && !value.contains(['\n', '\r', '\0'])
+}
+
 fn validate_password(value: &str) -> Result<(), String> {
-    if value.is_empty() || value.len() > 4096 || value.contains(['\n', '\r', '\0']) {
+    if !valid_credential(value) {
         return Err(
             "Invalid password: expected one nonempty UTF-8 line of at most 4096 bytes".into(),
         );
@@ -830,7 +841,24 @@ fn read_password(reader: impl BufRead) -> Result<String, String> {
 }
 
 fn read_password_file(path: &Path) -> Result<String, String> {
-    let file = std::fs::File::open(path).map_err(|_| "Cannot open password file")?;
+    if !std::fs::metadata(path)
+        .map_err(|_| "Cannot inspect password file")?
+        .is_file()
+    {
+        return Err("Password file must be a regular file".into());
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        // A regular path may be replaced with a FIFO between metadata and open.
+        // Never wait for a writer; inspect the opened handle before reading it.
+        options.custom_flags(libc::O_NONBLOCK);
+    }
+    let file = options
+        .open(path)
+        .map_err(|_| "Cannot open password file")?;
     let metadata = file
         .metadata()
         .map_err(|_| "Cannot inspect password file")?;
@@ -928,6 +956,45 @@ mod tests {
         assert_eq!(settings.mac, Some(MacAddr(1, 2, 3, 4, 5, 6)));
         assert_eq!(settings.time, NaiveTime::from_hms_opt(9, 30, 0).unwrap());
         assert!(settings.debug && settings.check_config);
+    }
+
+    #[test]
+    fn cli_overrides_do_not_validate_shadowed_configuration_types() {
+        let fields = [
+            (
+                "portal: {base_url: 42}",
+                "--portal-base",
+                "http://portal.example",
+            ),
+            (
+                "portal: {api_url: 42}",
+                "--portal-api",
+                "http://portal.example:801",
+            ),
+            ("portal: {ac_ip: 42}", "--portal-ac-ip", "192.0.2.1"),
+            ("portal: {client_ip: 42}", "--portal-client-ip", "192.0.2.2"),
+            ("eap_ip: 42", "--eap-ip", "192.0.2.3"),
+            ("udp_ip: 42", "--udp-ip", "192.0.2.4"),
+            ("status_file: 42", "--status-file", "current.json"),
+            ("status-file: 42", "--status-file", "current.json"),
+        ];
+        for (extra, option, value) in fields {
+            let yaml = credentials(extra);
+            assert!(parse(&yaml, &[]).is_err(), "{extra}");
+            let settings = parse(&yaml, &[option, value]).unwrap();
+            match option {
+                "--portal-base" => assert_eq!(settings.portal_base, value),
+                "--portal-api" => assert_eq!(settings.portal_api.as_deref(), Some(value)),
+                "--portal-ac-ip" => assert_eq!(settings.portal_ac_ip, Some(value.parse().unwrap())),
+                "--portal-client-ip" => {
+                    assert_eq!(settings.portal_client_ip, Some(value.parse().unwrap()))
+                }
+                "--eap-ip" => assert_eq!(settings.eap_ip, Some(value.parse().unwrap())),
+                "--udp-ip" => assert_eq!(settings.udp_ip, Some(value.parse().unwrap())),
+                "--status-file" => assert_eq!(settings.status_file, Some(PathBuf::from(value))),
+                _ => unreachable!(),
+            }
+        }
     }
 
     #[test]
@@ -1053,6 +1120,15 @@ mod tests {
     }
 
     #[test]
+    fn account_control_characters_are_rejected_before_authentication() {
+        for username in ["first\nsecond", "first\rsecond", "first\0second"] {
+            let error = parse(&credentials(""), &["--username", username]).unwrap_err();
+            assert!(error.starts_with("Invalid username:"));
+            assert!(!error.contains(username));
+        }
+    }
+
+    #[test]
     fn errors_do_not_echo_secret_values() {
         let error = parse("username: student\npassword: 123456789", &[]).unwrap_err();
         assert!(error.contains("password"));
@@ -1103,6 +1179,16 @@ mod tests {
         )
         .unwrap();
         assert_eq!(settings.username, account);
+        let boundary = "学".repeat(1365) + "a";
+        let settings = parse(&credentials("mode: portal"), &["--username", &boundary]).unwrap();
+        assert_eq!(settings.username.len(), 4096);
+        for username in ["line\nbreak".to_owned(), "a".repeat(4097)] {
+            assert!(
+                parse(&credentials("mode: portal"), &["--username", &username])
+                    .unwrap_err()
+                    .starts_with("Invalid username:")
+            );
+        }
     }
 
     #[test]

@@ -1,6 +1,6 @@
 [package]
 name = "drcom4scut"
-version = "0.4.0"
+version = "0.4.1"
 rust-version = "1.99"
 authors = ["SeaLoong <sealoongw@foxmail.com>"]
 edition = "2024"
@@ -55,6 +55,9 @@ strip = true
 default = ["log4rs", "portal-tls"]
 portal = ["dep:reqwest"]
 portal-tls = ["portal", "reqwest/rustls"]
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2.191"
 
 [target.'cfg(windows)'.dependencies]
 pcap = "2.5.0"

@@ -112,6 +112,43 @@ class PackagingTests(unittest.TestCase):
         self.assertTrue(all("musl" in target for target in supported))
         self.assertFalse(any("mips" in target for target in supported))
 
+    def test_openwrt_bundle_requires_and_ships_the_default_installation_config(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name, contents in {
+                "Cargo.toml": '[package]\nversion = "0.4.0"\n',
+                "README.md": "[OpenWrt](docs/openwrt.md)",
+                "LICENSE": "Fixture license",
+                "src/default_config.yml": "username: ''\n",
+                "docs/openwrt.md": "[Configuration](configuration.md)",
+                "docs/configuration.md": "Configuration guide",
+            }.items():
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(contents)
+            bundle = root / "packaging/openwrt"
+            for name in (
+                "files/drcom4scut.init", "files/drcom4scut.uci",
+                "install.sh", "install-common.sh", "install-luci.sh",
+            ):
+                path = bundle / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("Fixture installation resource")
+            target = "x86_64-unknown-linux-musl"
+            binary = root / "target" / target / "release/drcom4scut"
+            binary.parent.mkdir(parents=True)
+            binary.write_bytes(elf())
+            with patch.object(package_release.subprocess, "check_output", return_value="drcom4scut 0.4.0\n"):
+                with self.assertRaisesRegex(ValueError, "files/config.yml"):
+                    package_release.package(root, target)
+                (bundle / "files/config.yml").write_text("username: ''\n")
+                archive = package_release.package(root, target)
+            with tarfile.open(archive) as output:
+                prefix = f"drcom4scut-0.4.0-{target}/"
+                self.assertEqual(output.extractfile(prefix + "openwrt/files/config.yml").read(), b"username: ''\n")
+                self.assertEqual(output.extractfile(prefix + "docs/openwrt.md").read(), b"[Configuration](configuration.md)")
+                self.assertIn(b"docs/openwrt.md", output.extractfile(prefix + "OPENWRT.md").read())
+
 
 if __name__ == "__main__":
     unittest.main()

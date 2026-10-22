@@ -34,4 +34,4 @@ mv -f "$temporary_binary" /usr/bin/drcom4scut
 cp "$package_dir/openwrt/files/drcom4scut.init" "$temporary_service"
 chmod 755 "$temporary_service"
 mv -f "$temporary_service" /etc/init.d/drcom4scut
-echo 'Installed without starting the service; existing enabled settings are preserved. See OPENWRT.md.'
+echo 'Installed without starting the service; existing enabled settings are preserved. See docs/openwrt.md.'

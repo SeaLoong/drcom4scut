@@ -56,6 +56,7 @@ pub struct Process<'a> {
     rx: watch::Receiver<ChannelData>,
     data: ProcessData,
     ready: Option<watch::Sender<bool>>,
+    has_been_ready: bool,
 }
 
 impl<'a> Process<'a> {
@@ -76,6 +77,7 @@ impl<'a> Process<'a> {
             dns,
             data: ProcessData::default(),
             ready: None,
+            has_been_ready: false,
         }
     }
 
@@ -86,7 +88,14 @@ impl<'a> Process<'a> {
         self
     }
 
-    fn set_ready(&self, ready: bool) {
+    /// Whether this attempt completed a UDP handshake at least once, even if a
+    /// later heartbeat failed or `start` has already cleared current readiness.
+    pub fn has_been_ready(&self) -> bool {
+        self.has_been_ready
+    }
+
+    fn set_ready(&mut self, ready: bool) {
+        self.has_been_ready |= ready;
         if let Some(sender) = &self.ready {
             sender.send_replace(ready);
         }
@@ -191,6 +200,7 @@ impl<'a> Process<'a> {
                                 // Preserve healthy EAP authorization and try a new cycle;
                                 // startup/initial handshakes still have strict deadlines.
                                 error!("UDP heartbeat reply timeout; keeping EAP authorization.");
+                                self.set_ready(false);
                                 pending = None;
                                 phase = Phase::Idle;
                                 heartbeat = Instant::now() + self.heartbeat_interval();
@@ -495,17 +505,24 @@ mod tests {
     }
 
     async fn heartbeat(server: &UdpSocket) -> Vec<u8> {
+        heartbeat_at_counter(server, 1).await
+    }
+
+    async fn heartbeat_at_counter(server: &UdpSocket, counter: u8) -> Vec<u8> {
         server.send(&response(6, 8)).await.unwrap();
         let heartbeat1 = receive(server).await;
         assert_eq!(heartbeat1.len(), 40);
-        assert_eq!(&heartbeat1[..8], &[7, 1, 40, 0, 11, 1, 220, 2]);
+        assert_eq!(&heartbeat1[..8], &[7, counter, 40, 0, 11, 1, 220, 2]);
         let mut heartbeat2 = response(11, 40);
         heartbeat2[5] = 2;
         heartbeat2[16..20].copy_from_slice(&[11, 22, 33, 44]);
         server.send(&heartbeat2).await.unwrap();
         let heartbeat3 = receive(server).await;
         assert_eq!(heartbeat3.len(), 40);
-        assert_eq!(&heartbeat3[..8], &[7, 2, 40, 0, 11, 3, 220, 2]);
+        assert_eq!(
+            &heartbeat3[..8],
+            &[7, counter.wrapping_add(1), 40, 0, 11, 3, 220, 2],
+        );
         assert_eq!(&heartbeat3[8..10], &heartbeat1[8..10]);
         assert_eq!(&heartbeat3[16..20], &[11, 22, 33, 44]);
         assert_eq!(&heartbeat3[28..32], &[125, 217, 254, 225]);
@@ -729,6 +746,111 @@ mod tests {
                 .unwrap(),
             State::Stop
         );
+    }
+
+    #[tokio::test]
+    async fn e2e_udp_liveness_loss_and_recovery_preserve_eap_and_attempt_history() {
+        // Advance protocol deadlines, then resume the real clock before socket
+        // I/O. Paused-time auto-advancement must not race kernel UDP readiness.
+        async fn elapse(duration: Duration) {
+            tokio::time::pause();
+            tokio::time::advance(duration).await;
+            tokio::time::resume();
+        }
+
+        let mut settings = Settings {
+            username: "201836431154".into(),
+            hostname: "SeaLoong".into(),
+            ..Settings::default()
+        };
+        settings.retry.count = 1;
+        settings.retry.interval = 5000;
+        settings.heartbeat.udp_timeout = 1;
+        let server = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let client = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        client.connect(server.local_addr().unwrap()).await.unwrap();
+        server.connect(client.local_addr().unwrap()).await.unwrap();
+        let socket = Arc::new(Socket::new(client));
+        let (authorization, auth) = watch::channel(ChannelData {
+            state: State::Success,
+            data: vec![0x55; 16],
+        });
+        let (ready_tx, mut ready) = watch::channel(false);
+        let mut process = Process::new(
+            &settings,
+            socket.clone(),
+            auth,
+            MacAddr(0xb0, 0x25, 0xaa, 0x28, 0x6d, 0xb9),
+            "125.217.254.225".parse().unwrap(),
+            "202.38.193.33:53".parse().unwrap(),
+        )
+        .with_ready(ready_tx);
+        assert!(!process.has_been_ready());
+        let exchange = async {
+            login(&server).await;
+            heartbeat(&server).await;
+            assert!(
+                *timeout(Duration::from_secs(2), ready.wait_for(|value| *value))
+                    .await
+                    .unwrap()
+                    .unwrap(),
+            );
+            elapse(Duration::from_secs(1)).await;
+            let alive = receive(&server).await;
+            assert_eq!(alive[0], 0xff);
+            elapse(Duration::from_secs(5)).await;
+            assert_eq!(receive(&server).await, alive, "one identical retry");
+            elapse(Duration::from_secs(5)).await;
+            assert!(
+                !*timeout(Duration::from_secs(2), ready.wait_for(|value| !*value))
+                    .await
+                    .unwrap()
+                    .unwrap(),
+                "exhausted periodic replies must clear UDP readiness",
+            );
+            assert_eq!(authorization.borrow().state, State::Success);
+
+            // The same session retries another periodic exchange without EAP
+            // Logoff, reauthentication or a new UDP information handshake.
+            elapse(Duration::from_secs(1)).await;
+            assert_eq!(receive(&server).await[0], 0xff);
+            heartbeat_at_counter(&server, 3).await;
+            assert!(
+                *timeout(Duration::from_secs(2), ready.wait_for(|value| *value))
+                    .await
+                    .unwrap()
+                    .unwrap(),
+                "a complete recovered heartbeat must restore readiness",
+            );
+            assert_eq!(authorization.borrow().state, State::Success);
+            authorization.send_replace(ChannelData {
+                state: State::Quit,
+                data: Vec::new(),
+            });
+        };
+        let (state, ()) = tokio::join!(process.start(), exchange);
+        assert_eq!(state, State::Quit);
+        assert!(!*ready.borrow(), "an ended session cannot remain ready");
+        assert!(process.has_been_ready(), "attempt history survives cleanup");
+
+        let (_authorization, auth) = watch::channel(ChannelData {
+            state: State::Quit,
+            data: Vec::new(),
+        });
+        let mut fresh = Process::new(
+            &settings,
+            socket,
+            auth,
+            MacAddr::zero(),
+            "192.0.2.1".parse().unwrap(),
+            "192.0.2.53:53".parse().unwrap(),
+        );
+        assert!(
+            !fresh.has_been_ready(),
+            "a new attempt has no inherited history"
+        );
+        assert_eq!(fresh.start().await, State::Quit);
+        assert!(!fresh.has_been_ready(), "an unready attempt stays unready");
     }
 
     fn windows31_settings() -> Settings {

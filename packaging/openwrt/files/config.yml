@@ -1,0 +1,15 @@
+# Set username here; put only the password in /etc/drcom4scut/password (0600).
+username: ''
+host: s.scut.edu.cn
+time: '07:00'
+reconnect: 15
+heartbeat:
+  eap_timeout: 60
+  udp_timeout: 12
+retry:
+  count: 2
+  interval: 5000
+log:
+  enable_console: true
+  enable_file: false
+  level: INFO

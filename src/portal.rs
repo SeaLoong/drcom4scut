@@ -48,10 +48,31 @@ impl Default for PortalConfig {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PortalStatus {
     pub online: bool,
     pub client_ip: Ipv4Addr,
+    /// Account reported for this IP/MAC session, when supplied by the portal.
+    /// This private metadata must not be persisted in connection status or logs.
+    pub user_account: Option<String>,
+}
+
+impl PortalStatus {
+    /// Missing account metadata preserves the portal's network-ready semantics;
+    /// it is not evidence that the supplied credentials were authenticated.
+    pub fn account_matches(&self, username: &str) -> bool {
+        self.user_account.as_deref().is_none_or(|account| {
+            account.strip_suffix("@wifi").unwrap_or(account)
+                == username.strip_suffix("@wifi").unwrap_or(username)
+        })
+    }
+
+    fn require_account(self, username: &str) -> Result<Self, PortalError> {
+        if self.online && !self.account_matches(username) {
+            return Err(PortalError::AccountMismatch);
+        }
+        Ok(self)
+    }
 }
 
 /// Errors deliberately retain neither request URLs nor remote response text:
@@ -69,6 +90,7 @@ pub enum PortalError {
     InvalidResponse,
     MissingClientIp,
     MissingAcIp,
+    AccountMismatch,
     LoginRejected,
     OnlineNotConfirmed,
     LogoutNotConfirmed,
@@ -89,6 +111,7 @@ impl fmt::Display for PortalError {
             Self::InvalidResponse => "Portal returned malformed or unsupported JSON/JSONP",
             Self::MissingClientIp => "Portal did not report a usable client IPv4 address; set portal.client_ip explicitly",
             Self::MissingAcIp => "Portal AC address was not discovered; set portal.ac_ip or use the trusted portal entry URL",
+            Self::AccountMismatch => "Portal session belongs to a different account; disconnect it explicitly before signing in",
             Self::LoginRejected => "Portal rejected the login request",
             Self::OnlineNotConfirmed => "Portal accepted login but did not confirm this client's online session",
             Self::LogoutNotConfirmed => "Portal did not confirm this client's logout",
@@ -172,17 +195,27 @@ impl PortalClient {
         self.online_status(identity).await
     }
 
+    /// Query network readiness without accepting a known different account.
+    /// The portal may omit account metadata; no additional request is made.
+    pub async fn check_status_for(&self, username: &str) -> Result<PortalStatus, PortalError> {
+        self.check_status().await?.require_account(username)
+    }
+
     /// Authenticate and wait for a session belonging to this client. The campus
     /// ePortal protocol uses a GET query even though the password is sensitive;
     /// this method never logs URLs, request objects, bodies or remote messages.
     pub async fn login(&self, username: &str, password: &str) -> Result<PortalStatus, PortalError> {
-        if [username, password].iter().any(|value| {
-            value.is_empty() || value.len() > 4096 || value.contains(['\r', '\n', '\0'])
-        }) {
+        if [username, password]
+            .iter()
+            .any(|value| !crate::settings::valid_credential(value))
+        {
             return Err(PortalError::InvalidCredentials);
         }
         let identity = self.identity().await?;
-        let previous = self.online_status(identity.clone()).await?;
+        let previous = self
+            .online_status(identity.clone())
+            .await?
+            .require_account(username)?;
         if previous.online {
             return Ok(previous);
         }
@@ -211,7 +244,10 @@ impl PortalClient {
             if attempt != 0 {
                 tokio::time::sleep(self.config.confirm_interval).await;
             }
-            let status = self.online_status(identity.clone()).await?;
+            let status = self
+                .online_status(identity.clone())
+                .await?
+                .require_account(username)?;
             if status.online {
                 return Ok(status);
             }
@@ -334,7 +370,7 @@ impl PortalClient {
         if !success(&reply["result"]) {
             return Err(PortalError::InvalidResponse);
         }
-        let online = sessions.iter().any(|session| {
+        let session = sessions.iter().find(|session| {
             if value_ipv4(&session["online_ip"]) != Some(identity.ip) {
                 return false;
             }
@@ -348,8 +384,12 @@ impl PortalClient {
             }
         });
         Ok(PortalStatus {
-            online,
+            online: session.is_some(),
             client_ip: identity.ip,
+            user_account: session
+                .and_then(|session| session["user_account"].as_str())
+                .filter(|account| !account.is_empty())
+                .map(str::to_owned),
         })
     }
 
@@ -740,6 +780,16 @@ mod tests {
             r#"{"result":1,"list":[{"online_ip":"192.0.2.11","online_mac":"020000000002","is_owner_ip":1},{"online_ip":"192.0.2.10","online_mac":"020000000001"}]}"#,
         )
     }
+    fn online_account(account: Option<&str>) -> Reply {
+        let mut session = serde_json::json!({
+            "online_ip": "192.0.2.10",
+            "online_mac": "020000000001",
+        });
+        if let Some(account) = account {
+            session["user_account"] = account.into();
+        }
+        Reply::json(&serde_json::json!({"result": 1, "list": [session]}).to_string())
+    }
 
     #[test]
     fn plaintext_http_requires_explicit_opt_in() {
@@ -1027,6 +1077,111 @@ mod tests {
                 .unwrap();
             assert_eq!(status.online, expected);
         }
+    }
+
+    #[tokio::test]
+    async fn known_different_account_is_neither_reused_nor_disconnected() {
+        for account in [
+            "other-student@wifi",
+            "Student@wifi",
+            "student@other.example",
+        ] {
+            let server = mock(move |path| {
+                if path.starts_with("/drcom/") {
+                    identity()
+                } else {
+                    online_account(Some(account))
+                }
+            })
+            .await;
+            let client = PortalClient::new(server.config.clone()).unwrap();
+            let status = client.check_status().await.unwrap();
+            assert!(status.online);
+            assert_eq!(status.user_account.as_deref(), Some(account));
+            assert!(!status.account_matches("student"));
+            assert_eq!(
+                client.check_status_for("student").await,
+                Err(PortalError::AccountMismatch)
+            );
+            let error = client.login("student", "test-password").await.unwrap_err();
+            assert_eq!(error, PortalError::AccountMismatch);
+            assert!(!format!("{error:?}: {error}").contains(account));
+            let paths = server.paths.lock().unwrap();
+            assert_eq!(paths.len(), 6);
+            assert!(paths.iter().all(|path| {
+                path.starts_with("/drcom/chkstatus?")
+                    || path.starts_with("/eportal/portal/online_list?")
+            }));
+        }
+    }
+
+    #[tokio::test]
+    async fn matching_wifi_account_or_missing_metadata_reuses_ready_session() {
+        for (username, account) in [
+            ("student", Some("student")),
+            ("student", Some("student@wifi")),
+            ("student@wifi", Some("student")),
+            ("student@wifi", Some("student@wifi")),
+            ("student", None),
+        ] {
+            let server = mock(move |path| {
+                if path.starts_with("/drcom/") {
+                    identity()
+                } else {
+                    online_account(account)
+                }
+            })
+            .await;
+            let client = PortalClient::new(server.config.clone()).unwrap();
+            assert!(client.check_status_for(username).await.unwrap().online);
+            let status = client.login(username, "test-password").await.unwrap();
+            assert!(status.online);
+            assert_eq!(status.user_account.as_deref(), account);
+            let paths = server.paths.lock().unwrap();
+            assert_eq!(paths.len(), 4);
+            assert!(paths.iter().all(|path| {
+                path.starts_with("/drcom/chkstatus?")
+                    || path.starts_with("/eportal/portal/online_list?")
+            }));
+        }
+    }
+
+    #[tokio::test]
+    async fn accepted_login_cannot_confirm_a_known_different_account() {
+        let logged_in = Arc::new(AtomicBool::new(false));
+        let flag = logged_in.clone();
+        let server = mock(move |path| {
+            if path.starts_with("/drcom/") {
+                identity()
+            } else if path.starts_with("/eportal/portal/login?") {
+                flag.store(true, Ordering::SeqCst);
+                Reply::json(r#"{"result":1}"#)
+            } else if flag.load(Ordering::SeqCst) {
+                online_account(Some("other-student@wifi"))
+            } else {
+                offline()
+            }
+        })
+        .await;
+        let client = PortalClient::new(server.config.clone()).unwrap();
+        assert_eq!(
+            client.login("student", "test-password").await,
+            Err(PortalError::AccountMismatch)
+        );
+        let paths = server.paths.lock().unwrap();
+        assert_eq!(paths.len(), 4);
+        assert_eq!(
+            paths
+                .iter()
+                .filter(|path| path.starts_with("/eportal/portal/login?"))
+                .count(),
+            1
+        );
+        assert!(
+            !paths
+                .iter()
+                .any(|path| path.starts_with("/eportal/portal/logout?"))
+        );
     }
 
     #[tokio::test]

@@ -1,14 +1,14 @@
-# 相关客户端调研与兼容性记录
+# 相关客户端与协议参考
 
-调研日期：2026-10-23。调研范围是公开可读的 GitHub 仓库、选定分支、README、协议实现及问题记录；这不是对 GitHub 所有代码的完备性保证，也不是对第三方实机兼容性声明的背书。不同校区的有线 EAP/DrCOM、无线 Web Portal 和历史“翼起来”协议不能互相替代。
+记录日期：2026-10-23（北京时间）。以下固定提交、公开协议行为和可见许可证用于核对兼容性依据。范围限于下述公开检索结果和分支快照，私有、删除及未索引代码不在其中；第三方的自述也不构成本项目的实网验证。有线 EAP/DrCOM、无线 Web Portal 和历史“翼起来”协议分别记录。
 
 ## 检索范围
 
 GitHub repository search 使用 `scut drcom`（9 项）、`scutclient in:name`（17 项）、`scut-client in:name`（10 项）、`SCUT OpenWrt`（6 项）、`"SeaLoong/drcom4scut" in:readme`（1 项）、`SCUT network client`（4 项）及 `"华南理工大学" "客户端" in:readme`（152 项，两页全部读取）。结果重叠且包含同名无关项目，不能相加当作客户端数量。另检索 `scut 802.1x`、`"scut" "802"`、`华南理工 校园网`、`scutclient` 和 `"drcom4scut" in:readme`；公开搜索索引可能漏报，直接 fork 列表和引用链接用来补充。
 
-SeaLoong 两个仓库的直接 fork 共 11 个核心 fork、1 个 GUI fork；已检查每个 fork 的全部公开分支并继续检查子 fork 列表（本次为空）。有实质差异的分支包括：
+快照中的直接 fork 为核心 11 个、GUI 1 个；对应 API 返回的分支和子 fork 列表见[派生仓库记录](references-forks.md)。下表列出具有实质行为差异的来源：
 
-| 分支来源 | 固定版本 | 可复用观察 |
+| 分支来源 | 固定版本 | 行为记录 |
 | --- | --- | --- |
 | [gchh1/drcom4scut](https://github.com/gchh1/drcom4scut) | `118aea5d` | 有线源地址绑定、网卡/IP 变化检测、诊断和服务管理 |
 | [LuoMuQAQ/drcom4scut](https://github.com/LuoMuQAQ/drcom4scut) | `b9845c6e` | Windows GUI、DPAPI、凭据传递、优雅注销、父进程生命周期、托盘/自启 |
@@ -17,11 +17,11 @@ SeaLoong 两个仓库的直接 fork 共 11 个核心 fork、1 个 GUI fork；已
 | [AlexLin625/drcom4scut](https://github.com/AlexLin625/drcom4scut) | `719c6bbb` | DNS 故障切换修复 |
 | [gdzhht/drcom4scut](https://github.com/gdzhht/drcom4scut) | `ca7408a0` | DNS 故障切换修复 |
 
-其余 HarryHuangQi、unstartdev、AlexBybye、Accurio、cq01 的默认分支与原核心 HEAD 相同；cq01 的开发分支主要是依赖升级。Accurio GUI fork 与本次初始 GUI HEAD 相同。相关上游问题包括 #46（首次标识符循环）、#44（心跳）、#43（OpenWrt）、#34（拔线重连）、#38（Npcap 资源）。
+其余 HarryHuangQi、unstartdev、AlexBybye、Accurio、cq01 的默认分支与原核心 HEAD 相同；cq01 的开发分支主要是依赖升级。Accurio GUI fork 与 GUI 基线 `91c61d1f` 相同。相关上游问题包括 #46（首次标识符循环）、#44（心跳）、#43（OpenWrt）、#34（拔线重连）、#38（Npcap 资源）。
 
-## 可迁移能力与协议差异
+## 公开行为与协议差异
 
-| 来源 | 观察到的行为 | 本项目应采用的边界 |
+| 来源 | 观察到的行为 | 兼容性含义与范围 |
 | --- | --- | --- |
 | [drcom4scut-cpp](https://github.com/HarryHuangQi/drcom4scut-cpp) | 标准 PAE 组播目的地址的 EAP Identity 心跳 | 接受 `01:80:c2:00:00:03` 目的地址，但认证后仍锁定服务端源 MAC |
 | 同上 v0.2.3–0.2.4 | 周期 UDP 回包长期缺失时维持健康 EAP；初始建链失败仍严格处理 | 分开认证状态和 UDP 保活状态，不因 UDP 丢包自行注销 EAP |
@@ -36,11 +36,11 @@ SeaLoong 两个仓库的直接 fork 共 11 个核心 fork、1 个 GUI fork；已
 | [CampusNet](https://github.com/CmAsterr/CampusNet) | 多账号、校区配置、暂停/恢复重连，Windows/Android | 未指定开源许可证，仅记录行为，不复制源码或宣传已支持 Android |
 | [fsn_server](https://github.com/YSunLIN/fsn_server) | 路由器 Web 状态、账号持久化、自动重连、夜间选项 | 不移植匿名 HTTP 管理、明文凭据或老式自启动方式 |
 
-`windows-31` 依据第三方公开协议代码和模拟测试，并未在本次云环境中获得校园网实机认证证明。关键字段：MD5 扩展中的客户端标志为 `0x31`；MiscInfo 长度 260，DNS1/网关/DNS2 分别位于 76/80/84 偏移，OS 区域为零，版本区位于 116，hash 区位于 180，尾部位于 244。校验和覆盖全部 260 字节。MiscResponseInfo 后约 1400ms 发送 40 字节启动心跳（头 `070028000b010f27`），等候类型 0x0b、子类型 6 后才开始周期 Alive。legacy 流程保持原有线上格式。
+`windows-31` 的依据为表中固定版本的 drcom4scut-cpp 协议实现及模拟报文对照，没有对应校区实网认证结论。它与 legacy 共用 EAP 基本过程，Identity 扩展均为 `0044610000`；MD5 扩展中的客户端标志为 `0x31`；MiscInfo 长度 260，DNS1/网关/DNS2 分别位于 76/80/84 偏移，OS 区域为零，版本区位于 116，hash 区位于 180，尾部位于 244。校验和覆盖全部 260 字节。MiscResponseInfo 后约 1400ms 发送 40 字节启动心跳（头 `070028000b010f27`），等候类型 0x0b、子类型 6 后才开始周期 Alive。legacy 使用原客户端的 244 字节 MiscInfo，不执行这一步启动心跳确认。两种配置的周期心跳相同；名称与本机运行的操作系统无关。
 
 ## 固定版本清单
 
-这些源码只用于核对公开行为和固定报文；第三方仓库中的安装脚本没有在本环境执行。没有明确许可证的实现不复制。许可证栏只记录可见声明，不能替代具体文件的授权判断。
+清单固定到记录日期的提交。源码用于核对公开行为及报文，未执行第三方安装脚本。许可证栏记录可见声明；没有明确授权的实现只作为行为参考，不作为可复制源码。具体文件的版权与许可证仍须单独核对。
 
 | 仓库 | 调研 HEAD | 可见许可证 |
 | --- | --- | --- |
@@ -69,6 +69,6 @@ SeaLoong 两个仓库的直接 fork 共 11 个核心 fork、1 个 GUI fork；已
 | [scutclient/scutclient](https://github.com/scutclient/scutclient/tree/8c81f5d8968420e9dc13181a5f9295d2de10b14a) | `8c81f5d8968420e9dc13181a5f9295d2de10b14a` | AGPL-3.0 |
 | [scutclient/scutrouter](https://github.com/scutclient/scutrouter/tree/034e8a5cde2b2359738f8e8027406d5136a33920) | `034e8a5cde2b2359738f8e8027406d5136a33920` | 未确认独立许可证；不复制实现 |
 
-## 未采纳的危险或不适用行为
+## 适用范围
 
-不移植其他项目的真实账号、抓包和运行日志；不把示例服务器当作所有校区的固定服务器；不自动修改静态路由、DHCP、防火墙、DNS 或开启热点转发；不把关闭 TLS 验证、匿名 Web 管理、明文密码命令行或以进程存在推断已联网的做法作为功能。Android、旧“翼起来”协议、无线关联与路由器 NAT 管理属于不同系统边界，不应由本项目的认证进程隐式接管。
+这里记录的是认证与部署需求。实际校区入口由使用者核对，第三方示例服务器不是通用配置。系统负责无线关联、地址、路由、防火墙和 NAT；Android 与历史“翼起来”客户端也有不同的平台或协议边界。真实账号、私密抓包和运行日志不作为公开测试样本。传输安全、管理页面权限及连接成功判定，应按本项目的[配置](configuration.md)、[门户](portal.md)与[验证文档](development.md)分别核对。

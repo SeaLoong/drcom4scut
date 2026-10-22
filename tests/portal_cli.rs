@@ -54,6 +54,9 @@ struct PortalMock {
 }
 impl PortalMock {
     fn new(delay_periodic_check: bool) -> Self {
+        Self::session(delay_periodic_check, false)
+    }
+    fn session(delay_periodic_check: bool, foreign_account: bool) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
@@ -132,7 +135,9 @@ impl PortalMock {
                                     std::thread::sleep(Duration::from_millis(5));
                                 }
                             }
-                            if online.load(Ordering::SeqCst) { r#"{"result":1,"list":[{"online_ip":"192.0.2.10","online_mac":"020000000001"}]}"# }
+                            if online.load(Ordering::SeqCst) && foreign_account {
+                                r#"{"result":1,"list":[{"online_ip":"192.0.2.10","online_mac":"020000000001","user_account":"already-online-account"}]}"#
+                            } else if online.load(Ordering::SeqCst) { r#"{"result":1,"list":[{"online_ip":"192.0.2.10","online_mac":"020000000001"}]}"# }
                             else { r#"{"result":1,"list":[]}"# }
                         };
                         let body = format!("drcom4scut({json});");
@@ -290,6 +295,31 @@ fn once_portal_cli_confirms_the_mock_session_without_exposing_stdin_password() {
     assert!(!text.contains(PASSWORD));
     assert!(!text.contains("test-student"));
     assert_eq!(directory.status()["phase"], "online");
+    assert_eq!(directory.status()["online"], true);
+    assert_eq!(directory.status()["eap_authenticated"], false);
+}
+
+#[test]
+fn known_foreign_portal_account_is_not_reported_as_our_login_or_logged_out() {
+    let directory = Directory::new();
+    directory.config(Some("test-student"), "");
+    let server = PortalMock::session(false, true);
+    server.online.store(true, Ordering::SeqCst);
+    let mut command = server.command(&directory);
+    command.args(["--password-stdin", "--once"]);
+    let output = Process::start(command, Some(PASSWORD)).finish();
+    assert!(!output.status.success());
+    assert_eq!(server.logins.load(Ordering::SeqCst), 0);
+    assert_eq!(server.logouts.load(Ordering::SeqCst), 0);
+    assert!(
+        server.online.load(Ordering::SeqCst),
+        "the existing account must be left online"
+    );
+    let output = output_text(&output);
+    for secret in [PASSWORD, "test-student", "already-online-account"] {
+        assert!(!output.contains(secret));
+    }
+    assert_eq!(directory.status()["online"], false);
 }
 
 #[test]
