@@ -1,5 +1,7 @@
 """Rootless package, RPC scope and privacy fixtures; no router runtime claimed."""
 import json
+import os
+import tempfile
 from pathlib import Path
 import shutil
 import subprocess
@@ -9,6 +11,41 @@ PACKAGE = Path(__file__).resolve().parents[1]
 PLUGIN = PACKAGE / 'root/usr/libexec/rpcd/drcom4scut'
 SANITIZE = PACKAGE / 'root/usr/libexec/drcom4scut-luci-sanitize.sh'
 VIEW = PACKAGE / 'htdocs/luci-static/resources/view/drcom4scut.js'
+
+
+def backend_action(method, enabled, service_result=0):
+    """Execute production dispatch with only fixed OpenWrt dependencies replaced."""
+    with tempfile.TemporaryDirectory(prefix='luci-rpc-') as directory:
+        directory = Path(directory)
+        service_log, uci_log = directory / 'service.log', directory / 'uci.log'
+        shim = directory / 'jshn.sh'
+        shim.write_text(r'''json_init() { result_success=0; result_error=''; }
+json_add_boolean() { [ "$1" != success ] || result_success="$2"; }
+json_add_string() { [ "$1" != error ] || result_error="$2"; }
+json_dump() {
+    if [ "$result_success" = 1 ]; then printf '{"success":true}\n';
+    else printf '{"success":false,"error":"%s"}\n' "$result_error"; fi
+}
+''')
+        service = directory / 'service'
+        service.write_text('#!/bin/sh\nprintf "%s\\n" "$@" >> "$SERVICE_LOG"\nexit "$SERVICE_RESULT"\n')
+        uci = directory / 'uci'
+        uci.write_text('#!/bin/sh\nprintf "%s\\n" "$@" >> "$UCI_LOG"\nprintf "%s\\n" "$SAVED_ENABLED"\n')
+        service.chmod(0o755)
+        uci.chmod(0o755)
+        source = PLUGIN.read_text()
+        source = source.replace('. /usr/share/libubox/jshn.sh', '. "$FIXTURE_JSHN"')
+        source = source.replace('. /usr/libexec/drcom4scut-luci-sanitize.sh', '. "$FIXTURE_SANITIZE"')
+        source = source.replace('readonly SERVICE=/etc/init.d/drcom4scut', 'readonly SERVICE="$FIXTURE_SERVICE"')
+        source = source.replace('/sbin/uci -q get drcom4scut.main.enabled', '"$FIXTURE_UCI" -q get drcom4scut.main.enabled')
+        plugin = directory / 'rpc-plugin'
+        plugin.write_text(source)
+        environment = dict(os.environ, FIXTURE_JSHN=str(shim), FIXTURE_SANITIZE=str(SANITIZE),
+                           FIXTURE_SERVICE=str(service), FIXTURE_UCI=str(uci), SERVICE_LOG=str(service_log),
+                           UCI_LOG=str(uci_log), SAVED_ENABLED=enabled, SERVICE_RESULT=str(service_result))
+        result = subprocess.run(['sh', str(plugin), 'call', method], input='{}', text=True,
+                                capture_output=True, env=environment, check=True)
+        return json.loads(result.stdout), (service_log.read_text().splitlines() if service_log.exists() else []), (uci_log.read_text().splitlines() if uci_log.exists() else [])
 
 
 class LuciTests(unittest.TestCase):
@@ -34,6 +71,31 @@ class LuciTests(unittest.TestCase):
             result = subprocess.run([str(PLUGIN), 'call', method], input='{}', text=True, capture_output=True)
             self.assertEqual(result.returncode, 3)
             self.assertEqual(result.stdout, '')
+
+    def test_disabled_start_and_restart_are_rejected_without_init_execution(self):
+        for method in ['start', 'restart']:
+            for enabled in ['0', '']:
+                with self.subTest(method=method, enabled=enabled):
+                    result, service_calls, uci_calls = backend_action(method, enabled)
+                    self.assertEqual(result, {'success': False, 'error': 'disabled'})
+                    self.assertEqual(service_calls, [])
+                    self.assertEqual(uci_calls, ['-q', 'get', 'drcom4scut.main.enabled'])
+
+    def test_enabled_start_and_restart_use_only_the_fixed_action(self):
+        for method in ['start', 'restart']:
+            with self.subTest(method=method):
+                result, service_calls, uci_calls = backend_action(method, '1')
+                self.assertEqual(result, {'success': True})
+                self.assertEqual(service_calls, [method])
+                self.assertEqual(uci_calls, ['-q', 'get', 'drcom4scut.main.enabled'])
+        result, _, _ = backend_action('start', '1', service_result=1)
+        self.assertEqual(result, {'success': False, 'error': 'operation-failed'})
+
+    def test_stop_remains_available_when_persistent_enable_is_off(self):
+        result, service_calls, uci_calls = backend_action('stop', '0')
+        self.assertEqual(result, {'success': True})
+        self.assertEqual(service_calls, ['stop'])
+        self.assertEqual(uci_calls, [])
 
     def test_logs_never_return_raw_server_or_client_content(self):
         secret = 'fixture-private-password-without-any-label'

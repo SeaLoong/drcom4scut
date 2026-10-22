@@ -611,6 +611,7 @@ mod tests {
         headers: String,
         body: String,
         delay: Duration,
+        release: Option<Arc<tokio::sync::Notify>>,
     }
     impl Reply {
         fn json(body: &str) -> Self {
@@ -619,6 +620,7 @@ mod tests {
                 headers: String::new(),
                 body: format!("{CALLBACK}({body});"),
                 delay: Duration::ZERO,
+                release: None,
             }
         }
         fn redirect(url: &str) -> Self {
@@ -627,6 +629,7 @@ mod tests {
                 headers: format!("Location: {url}\r\n"),
                 body: String::new(),
                 delay: Duration::ZERO,
+                release: None,
             }
         }
     }
@@ -682,6 +685,9 @@ mod tests {
                         .unwrap();
                     saved.lock().unwrap().push(path.to_owned());
                     let reply = handler(path);
+                    if let Some(release) = &reply.release {
+                        release.notified().await;
+                    }
                     tokio::time::sleep(reply.delay).await;
                     let response = format!(
                         "HTTP/1.1 {} Test\r\nConnection: close\r\nContent-Length: {}\r\n{}\r\n{}",
@@ -1165,20 +1171,33 @@ mod tests {
 
     #[tokio::test]
     async fn status_timeouts_and_cancellation_do_not_leave_background_retries() {
+        // Keep the timeout probe separate: a request that timed out in the
+        // client may still be waiting for the mock server to read its headers.
+        let timeout_release = Arc::new(tokio::sync::Notify::new());
+        let mut timeout_server = mock(move |_| Reply {
+            release: Some(timeout_release.clone()),
+            ..identity()
+        })
+        .await;
+        timeout_server.config.timeout = Duration::from_millis(20);
+        let client = PortalClient::new(timeout_server.config.clone()).unwrap();
+        assert_eq!(client.check_status().await, Err(PortalError::RequestFailed));
+        drop(timeout_server);
+
         let count = Arc::new(AtomicUsize::new(0));
-        let seen = count.clone();
+        let observed = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(tokio::sync::Notify::new());
+        let (seen, received, response_gate) = (count.clone(), observed.clone(), release.clone());
         let mut server = mock(move |_| {
             seen.fetch_add(1, Ordering::SeqCst);
+            received.notify_one();
             Reply {
-                delay: Duration::from_millis(200),
+                release: Some(response_gate.clone()),
                 ..identity()
             }
         })
         .await;
-        server.config.timeout = Duration::from_millis(20);
-        let client = PortalClient::new(server.config.clone()).unwrap();
-        assert_eq!(client.check_status().await, Err(PortalError::RequestFailed));
-        server.config.timeout = Duration::from_secs(1);
+        server.config.timeout = Duration::from_secs(30);
         let client = PortalClient::new(server.config.clone()).unwrap();
         let (shutdown, receiver) = watch::channel(false);
         let operation = client.maintain(
@@ -1190,13 +1209,25 @@ mod tests {
         );
         tokio::pin!(operation);
         tokio::select! {
-            _ = tokio::time::sleep(Duration::from_millis(10)) => (),
+            // The server must have consumed the request before cancellation.
+            // A fixed 10ms delay does not establish this under CPU emulation.
+            biased;
+            _ = observed.notified() => (),
             result = &mut operation => panic!("must still await server: {result:?}"),
+            _ = tokio::time::sleep(Duration::from_secs(10)) => panic!("mock did not observe the request"),
         }
+        assert_eq!(count.load(Ordering::SeqCst), 1);
         shutdown.send_replace(true);
-        assert_eq!(operation.await, Ok(()));
-        let sent = count.load(Ordering::SeqCst);
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(5), operation)
+                .await
+                .expect("cancellation must terminate promptly"),
+            Ok(())
+        );
+        // Finish the already-observed request after cancellation. A detached
+        // protocol worker would now continue with online_list or another retry.
+        release.notify_one();
         tokio::time::sleep(Duration::from_millis(40)).await;
-        assert_eq!(count.load(Ordering::SeqCst), sent);
+        assert_eq!(count.load(Ordering::SeqCst), 1);
     }
 }

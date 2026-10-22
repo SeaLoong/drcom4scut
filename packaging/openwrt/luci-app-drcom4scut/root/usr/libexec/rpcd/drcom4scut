@@ -18,6 +18,14 @@ readonly SERVICE=/etc/init.d/drcom4scut
 readonly STATUS_FILE=/var/run/drcom4scut/status.json
 readonly STATUS_DIRECTORY=/var/run/drcom4scut
 
+service_enabled() {
+	# Read this one non-secret UCI option, never an RPC-supplied key or path.
+	case "$(/sbin/uci -q get drcom4scut.main.enabled 2>/dev/null)" in
+		1|on|true|yes|enabled) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
 is_running() {
 	"$SERVICE" running >/dev/null 2>&1
 }
@@ -57,13 +65,15 @@ read_status() {
 }
 
 emit_status() {
-	local diagnostic="$1" running=0
+	local diagnostic="$1" running=0 enabled=0
 	read_status
+	service_enabled && enabled=1
 	if is_running; then running=1; else phase=offline; eap=0; online=0; fi
 	json_init
 	json_add_int schema 1
 	json_add_boolean available "$available"
 	json_add_boolean running "$running"
+	json_add_boolean enabled "$enabled"
 	json_add_string version "$version"
 	json_add_string phase "$phase"
 	json_add_boolean eap_authenticated "$eap"
@@ -110,11 +120,21 @@ case "$2" in
 		json_dump
 		;;
 	start|stop|restart)
+		# An init-script start is a successful no-op while UCI disabled=0. Report
+		# that explicitly; never silently enable authentication from this method.
+		if [ "$2" != stop ] && ! service_enabled; then
+			json_init
+			json_add_boolean success 0
+			json_add_string error disabled
+			json_dump
+			exit 0
+		fi
 		# Exact allowlist above; no request-supplied argument reaches an executable.
 		result=0
 		"$SERVICE" "$2" >/dev/null 2>&1 || result=$?
 		json_init
 		json_add_boolean success "$([ "$result" = 0 ] && printf 1 || printf 0)"
+		[ "$result" = 0 ] || json_add_string error operation-failed
 		json_dump
 		;;
 esac

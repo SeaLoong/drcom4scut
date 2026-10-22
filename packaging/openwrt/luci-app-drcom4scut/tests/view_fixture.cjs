@@ -4,10 +4,11 @@ const fs = require('node:fs');
 const source = fs.readFileSync(process.argv[2], 'utf8');
 const options = [];
 const calls = [];
+const invocations = [];
 const secret = 'fixture-private-account-password';
 let downloaded;
 const response = {
-  status: { phase: 'online', running: true, version: '0.4.0' },
+  status: { phase: 'online', running: true, version: '0.4.0', enabled: false },
   logs: { events: [] },
   diagnostics: {
     phase: 'online', running: true, online: true, eap_authenticated: true,
@@ -18,7 +19,7 @@ const response = {
 };
 const rpc = { declare(definition) {
   calls.push([definition.object, definition.method]);
-  return () => Promise.resolve(response[definition.method] || { success: true });
+  return () => { invocations.push(definition.method); return Promise.resolve(response[definition.method] || { success: true }); };
 } };
 function Map() {}
 Map.prototype.section = () => ({ option(type, name, label) {
@@ -27,7 +28,7 @@ Map.prototype.section = () => ({ option(type, name, label) {
 Map.prototype.render = () => Promise.resolve({ kind: 'form' });
 const form = { Map, NamedSection: 'named', Flag: 'flag', Value: 'value' };
 function E(tag, attributes, children) {
-  return { tag, attributes, children, click() {}, remove() {} };
+  return { tag, attributes, children, style: {}, click() {}, remove() {} };
 }
 const L = { bind: (fn, self, ...args) => fn.bind(self, ...args), hasViewPermission: () => true };
 const UI = new Function('view', 'form', 'rpc', 'poll', 'dom', 'ui', 'uci', 'L', 'E', '_', 'Blob', 'URL', 'document', 'window', source)(
@@ -41,6 +42,35 @@ const UI = new Function('view', 'form', 'rpc', 'poll', 'dom', 'ui', 'uci', 'L', 
   await UI.render(data);
   assert.deepEqual(options.map(item => item.name), ['enabled', 'network', 'interface', 'config', 'password_file']);
   assert(!options.some(item => item.name === 'password' || item.type === 'password'));
+  // A disabled persisted service stays disabled after merely checking Enable.
+  assert.equal(UI.startButton.disabled, true);
+  assert.equal(UI.restartButton.disabled, true);
+  assert.equal(UI.stopButton.disabled, false);
+  const enabledOption = options.find(item => item.name === 'enabled');
+  enabledOption.onchange(null, 'main', '1');
+  assert.equal(UI.startButton.disabled, true);
+  await UI.runAction('start', {});
+  await UI.runAction('restart', {});
+  assert(!invocations.includes('start'));
+  assert(!invocations.includes('restart'));
+  // Only the authoritative saved UCI state arriving through status unlocks it.
+  response.status.enabled = true;
+  await UI.refresh();
+  assert.equal(UI.startButton.disabled, false);
+  assert.equal(UI.restartButton.disabled, false);
+  enabledOption.onchange(null, 'main', '0');
+  assert.equal(UI.startButton.disabled, true);
+  assert.equal(UI.stopButton.disabled, false);
+  enabledOption.onchange(null, 'main', '1');
+  await UI.runAction('restart', {});
+  assert.equal(invocations.filter(method => method === 'restart').length, 1);
+  response.status.enabled = false;
+  await UI.refresh();
+  assert.equal(UI.startButton.disabled, true);
+  await UI.runAction('stop', {});
+  assert.equal(invocations.filter(method => method === 'stop').length, 1);
+  assert.equal(UI.stopButton.disabled, false);
+
   for (const name of ['config', 'password_file']) {
     const option = options.find(item => item.name === name);
     assert.equal(option.validate('main', '/etc/drcom4scut/password'), true);

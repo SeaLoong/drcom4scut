@@ -2,7 +2,7 @@
 
 This independently authored package uses the public [LuCI JavaScript APIs](https://openwrt.github.io/luci/jsapi/) and [rpcd executable plugin protocol](https://openwrt.org/docs/techref/rpcd). It does not copy source from other clients or AGPL LuCI applications. The source is covered by this repository's LGPL-3.0-or-later license.
 
-The package provides connection status, start/stop/reconnect, safe categories for recent events, UCI service settings, and a JSON diagnostics download. It never reads password files or puts a password input in the browser. Accounts and passwords remain in the root-owned private core configuration/password files maintained through SSH.
+The package provides connection status, start/stop/reconnect, safe categories for recent events, UCI service settings, and a JSON diagnostics download. Start/reconnect remain disabled until Enable is saved and applied; the backend also rejects disabled starts without changing the persistent setting. Stop remains available for an already-running process. It never reads password files or puts a password input in the browser. Accounts and passwords remain in the root-owned private core configuration/password files maintained through SSH.
 
 Install the architecture-matched core and procd integration first. The LuCI package is architecture-independent; its rpcd helper supervises the fixed `/etc/init.d/drcom4scut` service and reads only `/var/run/drcom4scut/status.json`. It does not execute a path or command supplied by the browser.
 

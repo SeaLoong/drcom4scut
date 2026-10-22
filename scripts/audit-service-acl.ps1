@@ -17,10 +17,13 @@ function Assert-ServiceSecurityDescriptor {
     if ($null -eq $Descriptor.Owner -or $script:ServiceTrustedSids -notcontains $Descriptor.Owner.Value) {
         throw 'Untrusted service path owner'
     }
-    if (($Descriptor.ControlFlags -band [Security.AccessControl.ControlFlags]::DiscretionaryAclPresent) -eq 0 -or
+    if (([int]$Descriptor.ControlFlags -band [int][Security.AccessControl.ControlFlags]::DiscretionaryAclPresent) -eq 0 -or
         $null -eq $Descriptor.DiscretionaryAcl) { throw 'Null DACL or absent DACL grants unrestricted access' }
     foreach ($ace in $Descriptor.DiscretionaryAcl) {
-        if (($ace.AceFlags -band [Security.AccessControl.AceFlags]::InheritOnly) -ne 0) { continue }
+        # Windows PowerShell 5.1 cannot reliably apply -band to the byte-backed
+        # AceFlags enum. Compare numeric masks on both sides without changing
+        # which ACEs apply to this object.
+        if (([int]$ace.AceFlags -band [int][Security.AccessControl.AceFlags]::InheritOnly) -ne 0) { continue }
         # Evaluate raw ACEs so native GENERIC_* masks and callback ACEs cannot be
         # silently omitted by FileSystemSecurity.GetAccessRules conversion.
         if ($ace -isnot [Security.AccessControl.QualifiedAce]) { throw 'Unsupported DACL entry' }
@@ -45,7 +48,7 @@ function Assert-ServicePath {
     $item = Get-Item -LiteralPath $Path -Force
     $depth = 0
     while ($null -ne $item) {
-        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Reparse point in service path' }
+        if (([int]$item.Attributes -band [int][IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Reparse point in service path' }
         $acl = Get-Acl -LiteralPath $item.FullName
         $descriptor = [Security.AccessControl.RawSecurityDescriptor]::new($acl.GetSecurityDescriptorBinaryForm(), 0)
         $mask = if ($depth -le 1) { $write } else { $replace }
@@ -54,7 +57,7 @@ function Assert-ServicePath {
         Assert-ServiceSecurityDescriptor $descriptor $mask
         # DirectoryInfo returned by .Parent/.Directory has no provider-added
         # PSIsContainer note property; use the filesystem attribute at every depth.
-        $item = if (($item.Attributes -band [IO.FileAttributes]::Directory) -ne 0) { $item.Parent } else { $item.Directory }
+        $item = if (([int]$item.Attributes -band [int][IO.FileAttributes]::Directory) -ne 0) { $item.Parent } else { $item.Directory }
         $depth++
     }
 }

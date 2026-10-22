@@ -102,20 +102,44 @@ return view.extend({
 
 	refresh: function() {
 		return Promise.all([status(), logs()]).then(L.bind(function(result) {
+			this.serviceEnabled = !!(result[0] && result[0].enabled === true);
+			this.updateControls();
 			dom.content(this.statusNode, this.renderStatus(result[0] || {}));
 			dom.content(this.logNode, this.renderLogs(result[1] || {}));
 		}, this));
 	},
 
+	updateControls: function() {
+		var pending = this.requestedEnabled !== this.serviceEnabled;
+		var permitted = L.hasViewPermission();
+		var cannotStart = !permitted || !this.serviceEnabled || pending || this.actionPending;
+		if (this.startButton) this.startButton.disabled = cannotStart;
+		if (this.restartButton) this.restartButton.disabled = cannotStart;
+		if (this.stopButton) this.stopButton.disabled = !permitted || this.actionPending;
+		if (this.enableHint) this.enableHint.style.display = (!this.serviceEnabled || pending) ? '' : 'none';
+	},
+
 	runAction: function(method, event) {
-		var button = event.currentTarget;
-		button.disabled = true;
+		if (method !== 'stop' && (!this.serviceEnabled || this.requestedEnabled !== this.serviceEnabled))
+			return Promise.resolve();
+		this.actionPending = true;
+		this.updateControls();
 		return actions[method]().then(L.bind(function(result) {
-			if (!result.success) throw new Error('Service operation failed');
+			if (!result.success) {
+				if (result.error === 'disabled') {
+					this.serviceEnabled = false;
+					ui.addNotification(null, E('p', {}, _('Enable the service and save and apply the settings before starting or reconnecting.')), 'warning');
+					return this.refresh();
+				}
+				throw new Error('Service operation failed');
+			}
 			return this.refresh();
 		}, this)).catch(function() {
 			ui.addNotification(null, E('p', {}, _('The service operation failed. Check the private configuration and system log on the router.')), 'error');
-		}).finally(function() { button.disabled = !L.hasViewPermission(); });
+		}).finally(L.bind(function() {
+			this.actionPending = false;
+			this.updateControls();
+		}, this));
 	},
 
 	downloadDiagnostics: function() {
@@ -139,8 +163,15 @@ return view.extend({
 			_('Manage the dedicated client service. Maintain the password through SSH in a root-owned private file; this page only stores its path.'));
 		var section = map.section(form.NamedSection, 'main', 'client', _('Service settings'));
 		section.addremove = false;
+		this.serviceEnabled = !!(data[1] && data[1].enabled === true);
+		this.requestedEnabled = this.serviceEnabled;
+		this.actionPending = false;
 		var option = section.option(form.Flag, 'enabled', _('Enable service'));
 		option.rmempty = false;
+		option.onchange = L.bind(function(event, sectionId, value) {
+			this.requestedEnabled = value === '1' || value === 1 || value === true;
+			this.updateControls();
+		}, this);
 		option = section.option(form.Value, 'network', _('Logical network'));
 		option.default = 'wan';
 		option.rmempty = false;
@@ -169,12 +200,15 @@ return view.extend({
 
 		this.statusNode = E('div', {}, this.renderStatus(data[1] || {}));
 		this.logNode = E('div', {}, this.renderLogs(data[2] || {}));
+		this.startButton = E('button', { 'class': 'cbi-button cbi-button-apply', type: 'button', click: L.bind(this.runAction, this, 'start') }, _('Start'));
+		this.stopButton = E('button', { 'class': 'cbi-button cbi-button-reset', type: 'button', click: L.bind(this.runAction, this, 'stop') }, _('Stop'));
+		this.restartButton = E('button', { 'class': 'cbi-button cbi-button-reload', type: 'button', click: L.bind(this.runAction, this, 'restart') }, _('Reconnect'));
+		this.enableHint = E('p', {}, _('Enable the service and save and apply the settings before starting or reconnecting.'));
 		var controls = E('div', { 'class': 'cbi-section' }, [
-			E('button', { 'class': 'cbi-button cbi-button-apply', type: 'button', disabled: !L.hasViewPermission(), click: L.bind(this.runAction, this, 'start') }, _('Start')),
-			' ', E('button', { 'class': 'cbi-button cbi-button-reset', type: 'button', disabled: !L.hasViewPermission(), click: L.bind(this.runAction, this, 'stop') }, _('Stop')),
-			' ', E('button', { 'class': 'cbi-button cbi-button-reload', type: 'button', disabled: !L.hasViewPermission(), click: L.bind(this.runAction, this, 'restart') }, _('Reconnect')),
+			this.enableHint, this.startButton, ' ', this.stopButton, ' ', this.restartButton,
 			' ', E('button', { 'class': 'cbi-button cbi-button-action', type: 'button', click: L.bind(this.downloadDiagnostics, this) }, _('Export redacted diagnostics'))
 		]);
+		this.updateControls();
 		poll.add(L.bind(function() { return this.refresh().catch(function() {}); }, this), 5);
 		return map.render().then(L.bind(function(formNode) {
 			return E('div', {}, [this.statusNode, controls, this.logNode, formNode]);

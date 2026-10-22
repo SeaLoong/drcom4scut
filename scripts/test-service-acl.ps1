@@ -37,6 +37,13 @@ foreach ($rights in @('FR', 'GR', 'FA', 'GA', 'FW', 'GW')) {
 $readableBinary = Descriptor 'O:BAG:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FR;;;BU)'
 Assert-ServiceSecurityDescriptor $readableBinary $write
 $script:Assertions++
+# Inherit-only rules do not apply to the current object. Inherited effective
+# rules do, and must receive the same rejection as explicit unsafe rules.
+$inheritOnly = Descriptor 'O:BAG:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;OIIO;FR;;;WD)'
+Assert-ServiceSecurityDescriptor $inheritOnly $readWrite
+$script:Assertions++
+$inheritedWrite = Descriptor 'O:BAG:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)(A;ID;FW;;;WD)'
+Expect-Rejection { Assert-ServiceSecurityDescriptor $inheritedWrite $readWrite } 'inherited effective access' 'Untrusted service path access rule'
 $denyAndAllow = Descriptor 'O:BAG:BAD:P(D;;FR;;;WD)(A;;FR;;;WD)(A;;FA;;;SY)(A;;FA;;;BA)'
 Expect-Rejection { Assert-ServiceSecurityDescriptor $denyAndAllow $readWrite } 'deny does not relax an unsafe allow' 'Untrusted service path access rule'
 

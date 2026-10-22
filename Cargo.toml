@@ -38,7 +38,8 @@ features = ["yaml"]
 
 [dependencies.log4rs]
 version = "1.4.0"
-features = ["gzip"]
+default-features = false
+features = ["console_appender", "rolling_file_appender", "compound_policy", "fixed_window_roller", "size_trigger", "gzip"]
 optional = true
 
 [dev-dependencies]
