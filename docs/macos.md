@@ -11,7 +11,7 @@
 | Intel Mac | `x86_64-apple-darwin.tar.gz` |
 | Apple Silicon Mac | `aarch64-apple-darwin.tar.gz` |
 
-两个包分别包含原生程序，不需要为了运行 Intel 包在 Apple Silicon 上安装 Rosetta。核心包与 GUI 包单独下载；GUI 的系统版本要求见[图形界面说明](https://github.com/SeaLoong/drcom4scutGUI#安装)，不能用核心的系统兼容范围推断 GUI 可用范围。
+两个包分别包含原生程序；Apple Silicon 用户选择 `aarch64` 包即可原生运行，无需 Rosetta。核心包与 GUI 包单独下载；GUI 的系统版本要求见[图形界面说明](https://github.com/SeaLoong/drcom4scutGUI#安装)，不能用核心的系统兼容范围推断 GUI 可用范围。
 
 下载后用 `shasum -a 256 文件名` 计算归档摘要，与同一 Release 的 `SHA256SUMS` 中对应文件那一行比较，再解压。终端进入解压后的目录，运行：
 
