@@ -67,6 +67,28 @@ fn validate_socket_permissions(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(unix)]
+fn peer_user(stream: &tokio::net::UnixStream) -> std::io::Result<libc::uid_t> {
+    #[cfg(target_os = "macos")]
+    {
+        use std::os::fd::AsRawFd;
+        let (mut user, mut group) = (0, 0);
+        // Darwin caches peer credentials after disconnect. Tokio also queries
+        // LOCAL_PEEREPID, which returns ENOTCONN after a parent crash, so obtain
+        // only the UID actually needed for this authorization check.
+        // SAFETY: stream owns a live socket; both outputs are valid, initialized
+        // uid_t/gid_t values and getpeereid retains no pointers.
+        if unsafe { libc::getpeereid(stream.as_raw_fd(), &mut user, &mut group) } != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(user)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        stream.peer_cred().map(|credentials| credentials.uid())
+    }
+}
+
 /// The GUI owns a private Unix-domain listener. A stop request or parent EOF
 /// initiates the same bounded logout as Ctrl-C; no TCP port or secret is used.
 pub async fn wait_socket(path: Option<&Path>) -> Result<(), String> {
@@ -87,10 +109,7 @@ pub async fn wait_socket(path: Option<&Path>) -> Result<(), String> {
         .map_err(|_| "Cannot connect private GUI control socket")?;
         // Verify the connected process as well as the endpoint's filesystem ACL.
         // SAFETY: geteuid does not access pointers or retain resources.
-        if stream
-            .peer_cred()
-            .map_err(|_| "Cannot verify private GUI control peer")?
-            .uid()
+        if peer_user(&stream).map_err(|_| "Cannot verify private GUI control peer")?
             != unsafe { libc::geteuid() }
         {
             return Err("Private GUI control peer belongs to another user".into());
