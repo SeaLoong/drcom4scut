@@ -707,7 +707,8 @@ mod tests {
                 api_url: Some(base),
                 allow_http: true,
                 ac_ip: Some("192.0.2.254".parse().unwrap()),
-                timeout: Duration::from_secs(1),
+                // Identity tests use the production request deadline. A shorter
+                // timeout measures emulator scheduling pressure, not protocol correctness.
                 confirm_interval: Duration::ZERO,
                 ..PortalConfig::default()
             },

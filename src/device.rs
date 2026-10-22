@@ -1,6 +1,6 @@
 #[cfg(not(windows))]
-use pnet::datalink::{Channel, Config, channel};
-use pnet::datalink::{DataLinkReceiver, DataLinkSender, MacAddr, NetworkInterface, interfaces};
+use pnet::datalink::{Channel, Config, channel, interfaces};
+use pnet::datalink::{DataLinkReceiver, DataLinkSender, MacAddr, NetworkInterface};
 use pnet::ipnetwork::IpNetwork;
 use std::io::{Error, ErrorKind, Result};
 use std::net::{IpAddr, Ipv4Addr};
@@ -29,7 +29,10 @@ fn get_first_valid_ip(e: &NetworkInterface) -> Option<&IpNetwork> {
 }
 
 pub fn get_all_interfaces() -> Vec<NetworkInterface> {
+    #[cfg(not(windows))]
     let mut all_interfaces = interfaces();
+    #[cfg(windows)]
+    let mut all_interfaces = windows_inventory::interfaces();
     #[cfg(windows)]
     for interface in &mut all_interfaces {
         use windows_sys::Win32::NetworkManagement::{
@@ -57,6 +60,229 @@ pub fn get_all_interfaces() -> Vec<NetworkInterface> {
     }
     all_interfaces.sort_by_key(|interface| interface.index);
     all_interfaces
+}
+
+#[cfg(windows)]
+mod windows_inventory {
+    use super::*;
+    use windows_sys::Win32::{
+        NetworkManagement::{
+            IpHelper::{
+                GAA_FLAG_INCLUDE_ALL_INTERFACES, GAA_FLAG_SKIP_ANYCAST, GAA_FLAG_SKIP_DNS_SERVER,
+                GAA_FLAG_SKIP_MULTICAST, GetAdaptersAddresses, IP_ADAPTER_ADDRESSES_LH,
+            },
+            Ndis::IfOperStatusUp,
+        },
+        Networking::WinSock::{AF_INET, SOCKADDR_IN},
+    };
+
+    // pnet's Windows inventory invokes PacketGetAdapterNames. Inventory must
+    // remain available before Npcap installation, including for wireless Portal.
+    // IP Helper also retains loopback and links awaiting their first DHCP lease.
+    pub(super) fn interfaces() -> Vec<NetworkInterface> {
+        let flags = GAA_FLAG_INCLUDE_ALL_INTERFACES
+            | GAA_FLAG_SKIP_ANYCAST
+            | GAA_FLAG_SKIP_MULTICAST
+            | GAA_FLAG_SKIP_DNS_SERVER;
+        let mut size = 15_000u32;
+        for _ in 0..3 {
+            if size == 0 || size > 16 * 1024 * 1024 {
+                return Vec::new();
+            }
+            // Typed storage provides the alignment required by the native API.
+            let count = (size as usize).div_ceil(std::mem::size_of::<IP_ADAPTER_ADDRESSES_LH>());
+            let mut storage = vec![IP_ADAPTER_ADDRESSES_LH::default(); count];
+            // SAFETY: storage is aligned, initialized and at least `size` bytes;
+            // the API retains no pointers after return. Its linked records and
+            // strings remain alive until all fields are copied into owned Rust data.
+            let result = unsafe {
+                GetAdaptersAddresses(
+                    AF_INET as u32,
+                    flags,
+                    std::ptr::null(),
+                    storage.as_mut_ptr(),
+                    &mut size,
+                )
+            };
+            if result == 111 {
+                continue; // ERROR_BUFFER_OVERFLOW: adapter topology changed.
+            }
+            if result != 0 {
+                return Vec::new();
+            }
+            let mut interfaces = Vec::new();
+            let mut cursor = storage.as_ptr();
+            while !cursor.is_null() {
+                // SAFETY: a successful GetAdaptersAddresses call supplies a
+                // valid linked list, kept alive by storage throughout this walk.
+                let adapter = unsafe { &*cursor };
+                // SAFETY: all adapter pointers refer to the same live API buffer.
+                interfaces.push(unsafe { from_adapter(adapter) });
+                cursor = adapter.Next;
+            }
+            return interfaces;
+        }
+        Vec::new()
+    }
+
+    // SAFETY: embedded pointers must reference initialized, live IP Helper records
+    // and NUL-terminated strings until this function has copied their contents.
+    unsafe fn from_adapter(adapter: &IP_ADAPTER_ADDRESSES_LH) -> NetworkInterface {
+        // SAFETY: AdapterName is the native API's live NUL-terminated ANSI name.
+        let name = if adapter.AdapterName.is_null() {
+            String::new()
+        } else {
+            unsafe { std::ffi::CStr::from_ptr(adapter.AdapterName.cast()) }
+                .to_string_lossy()
+                .into_owned()
+        };
+        // SAFETY: both fields are live API-owned NUL-terminated UTF-16 strings.
+        let mut description = unsafe { wide_string(adapter.FriendlyName) };
+        if description.is_empty() {
+            description = unsafe { wide_string(adapter.Description) };
+        }
+        let mut ips = Vec::new();
+        let mut cursor = adapter.FirstUnicastAddress;
+        while !cursor.is_null() {
+            // SAFETY: the caller keeps the linked unicast records alive.
+            let address = unsafe { &*cursor };
+            if !address.Address.lpSockaddr.is_null()
+                && address.Address.iSockaddrLength >= std::mem::size_of::<SOCKADDR_IN>() as i32
+            {
+                // SAFETY: the length is sufficient for sockaddr_in; reading
+                // unaligned also supports buffers whose sockaddr lacks alignment.
+                let socket = unsafe {
+                    std::ptr::read_unaligned(address.Address.lpSockaddr.cast::<SOCKADDR_IN>())
+                };
+                if socket.sin_family == AF_INET {
+                    // SAFETY: AF_INET selects the IPv4 member. to_ne_bytes
+                    // preserves its network-order bytes on either CPU endian.
+                    let ip = Ipv4Addr::from(unsafe { socket.sin_addr.S_un.S_addr }.to_ne_bytes());
+                    if let Ok(network) = IpNetwork::new(ip.into(), address.OnLinkPrefixLength) {
+                        ips.push(network);
+                    }
+                }
+            }
+            cursor = address.Next;
+        }
+        let mac = (adapter.PhysicalAddressLength == 6).then(|| {
+            let bytes = adapter.PhysicalAddress;
+            MacAddr::new(bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5])
+        });
+        // SAFETY: the documented anonymous header contains initialized IfIndex.
+        let index = unsafe { adapter.Anonymous1.Anonymous.IfIndex };
+        let mut flags = if adapter.OperStatus == IfOperStatusUp {
+            1
+        } else {
+            0
+        };
+        if adapter.IfType == 24 {
+            flags |= 4; // Windows pnet IFF_LOOPBACK / IF_TYPE_SOFTWARE_LOOPBACK.
+        }
+        NetworkInterface {
+            name: format!(r"\Device\NPF_{name}"),
+            description,
+            index,
+            mac,
+            ips,
+            flags,
+        }
+    }
+
+    unsafe fn wide_string(pointer: *const u16) -> String {
+        if pointer.is_null() {
+            return String::new();
+        }
+        let mut length = 0;
+        // SAFETY: the caller guarantees a live NUL-terminated UTF-16 string.
+        while unsafe { *pointer.add(length) } != 0 {
+            length += 1;
+        }
+        // SAFETY: the preceding scan found the initialized string's terminator.
+        String::from_utf16_lossy(unsafe { std::slice::from_raw_parts(pointer, length) })
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use windows_sys::Win32::{
+            NetworkManagement::IpHelper::IP_ADAPTER_UNICAST_ADDRESS_LH,
+            Networking::WinSock::{IN_ADDR, IN_ADDR_0, SOCKET_ADDRESS},
+        };
+
+        #[test]
+        fn inventory_preserves_capture_name_unicode_mac_and_ipv4_prefix() {
+            let mut name = b"{12345678-1234-1234-1234-123456789ABC}\0".to_vec();
+            let mut friendly: Vec<u16> = "校园以太网".encode_utf16().chain(Some(0)).collect();
+            let mut socket = SOCKADDR_IN {
+                sin_family: AF_INET,
+                sin_addr: IN_ADDR {
+                    S_un: IN_ADDR_0 {
+                        S_addr: u32::from_ne_bytes([192, 0, 2, 17]),
+                    },
+                },
+                ..SOCKADDR_IN::default()
+            };
+            let mut unicast = IP_ADAPTER_UNICAST_ADDRESS_LH {
+                Address: SOCKET_ADDRESS {
+                    lpSockaddr: (&mut socket as *mut SOCKADDR_IN).cast(),
+                    iSockaddrLength: std::mem::size_of::<SOCKADDR_IN>() as i32,
+                },
+                OnLinkPrefixLength: 24,
+                ..IP_ADAPTER_UNICAST_ADDRESS_LH::default()
+            };
+            let mut adapter = IP_ADAPTER_ADDRESSES_LH {
+                AdapterName: name.as_mut_ptr(),
+                FriendlyName: friendly.as_mut_ptr(),
+                FirstUnicastAddress: &mut unicast,
+                PhysicalAddressLength: 6,
+                PhysicalAddress: [2, 1, 2, 3, 4, 5, 0, 0],
+                OperStatus: IfOperStatusUp,
+                ..IP_ADAPTER_ADDRESSES_LH::default()
+            };
+            adapter.Anonymous1.Anonymous.IfIndex = 17;
+            // SAFETY: fixture strings, sockaddr and unicast records remain alive.
+            let interface = unsafe { from_adapter(&adapter) };
+            assert_eq!(
+                interface.name,
+                r"\Device\NPF_{12345678-1234-1234-1234-123456789ABC}"
+            );
+            assert_eq!(interface.description, "校园以太网");
+            assert_eq!(interface.index, 17);
+            assert_eq!(interface.mac, Some(MacAddr::new(2, 1, 2, 3, 4, 5)));
+            assert_eq!(
+                interface.ips,
+                ["192.0.2.17/24".parse::<IpNetwork>().unwrap()]
+            );
+            assert!(interface.is_up());
+        }
+
+        #[test]
+        fn inventory_retains_loopback_and_links_before_dhcp_without_fabricating_mac() {
+            let adapter = IP_ADAPTER_ADDRESSES_LH {
+                IfType: 24,
+                OperStatus: IfOperStatusUp,
+                ..IP_ADAPTER_ADDRESSES_LH::default()
+            };
+            // SAFETY: all optional fixture pointers are null and no list is read.
+            let interface = unsafe { from_adapter(&adapter) };
+            assert!(interface.is_loopback());
+            assert!(interface.is_up());
+            assert!(interface.mac.is_none());
+            assert!(interface.ips.is_empty());
+            let adapter = IP_ADAPTER_ADDRESSES_LH {
+                IfType: 6,
+                ..adapter
+            };
+            // SAFETY: all optional fixture pointers remain null.
+            let interface = unsafe { from_adapter(&adapter) };
+            assert!(!interface.is_loopback());
+            assert!(
+                interface.ips.is_empty(),
+                "a link awaiting DHCP stays in inventory"
+            );
+        }
+    }
 }
 
 pub fn get_device(mac: Option<MacAddr>, ip: Option<IpAddr>) -> Result<Device> {

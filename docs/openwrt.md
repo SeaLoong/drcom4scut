@@ -20,7 +20,7 @@
 2. 进入解压目录执行 `sh openwrt/install.sh`。安装器会先执行 `--version` 拒绝错误 CPU/ABI 的程序，拒绝现有配置目录/文件的符号链接和非 root 所有者，不会覆盖已有账号或密码配置，也不会自动启用认证。
 3. 编辑 `/etc/drcom4scut/config.yml` 的 `username`。升级时先删除旧 YAML 中的明文 `password` 字段。密码只写入 `/etc/drcom4scut/password`：推荐在路由器上用编辑器输入，避免把密码写入 shell 历史或命令行。此文件可以有一个结尾换行，不应有多行内容。
 4. 执行 `chown root:root /etc/drcom4scut/password; chmod 600 /etc/drcom4scut/password`。服务拒绝组/其他用户可读或非 root 所有的密码文件。不要把密码放入 UCI、启动命令或日志。
-5. 通过 `/usr/bin/drcom4scut --list-interfaces` 找到连接学校网线的物理接口。默认服务从 netifd 的 `wan` 网络取得二层设备（认证前尚未取得 DHCP 地址也能启动）；使用 bridge、VLAN、DSA 时请确认它确实能收发学校的 802.1X 以太网帧。需要时配置 `uci set drcom4scut.main.interface='eth0.2'`，并把 `network` 设为对应的逻辑网络。
+5. 通过 `/usr/bin/drcom4scut --list-interfaces` 找到连接学校网线的物理接口。默认服务从 netifd 的 `wan` 网络取得二层设备，不依赖尚未创建的三层设备名；核心开始认证仍需要该接口已有可用 IPv4，否则会等待并重试。当前没有实现先以 `0.0.0.0` 完成 EAP、再获取 DHCP 地址的流程。使用 bridge、VLAN、DSA 时请确认它确实能收发学校的 802.1X 以太网帧。需要时配置 `uci set drcom4scut.main.interface='eth0.2'`，并把 `network` 设为对应的逻辑网络。
 6. 先执行 `/usr/bin/drcom4scut --check-config --config /etc/drcom4scut/config.yml --password-file /etc/drcom4scut/password`，再执行以下不包含密码的启用命令：
 
 ```sh

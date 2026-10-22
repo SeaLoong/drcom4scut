@@ -192,7 +192,7 @@ fn bind_selected_interface(socket: &UdpSocket, source: IpAddr) -> io::Result<()>
     if source.is_unspecified() || source.is_loopback() {
         return Ok(());
     }
-    let interfaces = pnet::datalink::interfaces();
+    let interfaces = crate::device::get_all_interfaces();
     let index = selected_interface(source, &interfaces)?.index;
     let index = index.to_be();
     // SAFETY: `socket` owns a live Winsock socket throughout this call. The DWORD

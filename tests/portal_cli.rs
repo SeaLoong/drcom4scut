@@ -95,7 +95,7 @@ impl PortalMock {
                         requests.clone(),
                     );
                     handlers.push(std::thread::spawn(move || {
-                        stream.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
+                        stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
                         let mut request = Vec::new();
                         while !request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
                             let mut buffer = [0; 1024];

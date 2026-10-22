@@ -11,7 +11,7 @@
 - DNS 和 DrCOM UDP 绑定真实本地 IPv4。Linux 使用 `SO_BINDTODEVICE`，Windows 使用 `IP_UNICAST_IF`，拒绝歧义接口。报文中的 `eap_ip` / `udp_ip` 与传输源地址分开。
 - 未固定 `ip` 时，每五秒检查所选网卡的地址；DHCP 地址消失/变化时先注销并重建会话。固定 `ip` 的配置由用户负责维护。
 - Unix pnet 的阻塞收发隔离在有限超时的适配层；取消中的读取被保留并复用，不重复排队或丢弃已收到的帧。Windows 使用非阻塞 pcap，避免 pnet 忽略读取超时导致退出挂起。
-- Windows 网卡状态通过系统接口补齐；抓包前从受信系统目录加载 Npcap，缺少驱动时返回诊断错误。MSVC 延迟加载允许无驱动执行帮助、版本和不抓包测试。
+- Windows 通过 IP Helper 枚举网卡、IPv4 和状态，列出网卡及无线 Portal 不依赖 Npcap。抓包前从受信系统目录加载 Npcap，缺少驱动时返回诊断错误；MSVC 延迟加载允许无驱动执行帮助、版本和不抓包测试。
 - GUI 密码只使用 EOF 分帧的私有 stdin；独立随机命名管道只允许固定 `stop\n` 或父进程 EOF。GUI 先请求有界清理，超时才终止所属进程树，不杀其他客户端。
 - Portal 为独立 provider。HTTP 必须明确允许，HTTPS 不降级；入口只接受公开网关元数据，不能保存带账号/密码/token 的登录 URL。只有本机 IP 以及已知 MAC 均匹配在线列表才算成功。
 
