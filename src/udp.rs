@@ -1,27 +1,24 @@
-use std::cmp::min;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU8, Ordering};
-use std::sync::{Arc, RwLock};
-use std::thread::{self, JoinHandle, Thread};
+use std::net::{IpAddr, SocketAddr};
+use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::BytesMut;
-use chrono::Local;
-use crossbeam_channel::{Receiver, Sender, TryRecvError, unbounded};
 use log::{debug, error, info};
 use pnet::datalink::MacAddr;
+use tokio::sync::watch;
+use tokio::time::{Instant, sleep_until};
 
-use crate::settings::Settings;
+use crate::settings::{Profile, Settings};
 use crate::socket::Socket;
 use crate::udp::packet::{
     Alive, HeaderType, HeartbeatType, MiscAlive, MiscHeartbeat1, MiscHeartbeat3, MiscInfo,
-    decrypt_info,
+    StartupHeartbeat, decrypt_info,
 };
-use crate::util::{self, ChannelData, State, random_vec, sleep};
+use crate::util::{ChannelData, State, random_vec};
 
 mod packet;
 
-#[derive(Default, Debug, PartialEq, Eq, Hash, Clone)]
+#[derive(Default, Debug, PartialEq, Eq, Clone)]
 struct ProcessData {
     counter: u8,
     rnd: Vec<u8>,
@@ -30,592 +27,868 @@ struct ProcessData {
     decrypted_from_misc_response_info: Vec<u8>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Phase {
+    ResponseAlive,
+    ResponseInfo,
+    StartupDelay,
+    StartupAck,
+    HeartbeatAlive,
+    Heartbeat2,
+    Heartbeat4,
+    Idle,
+}
+
+struct Pending {
+    packet: Vec<u8>,
+    retries: u32,
+    deadline: Instant,
+}
+
+/// One UDP session owns its state. Dropping `start` cancels all pending I/O and
+/// timers: it creates no detached tasks, polling loops or background threads.
 pub struct Process<'a> {
     mac: MacAddr,
     ip: IpAddr,
     dns: SocketAddr,
     settings: &'a Settings,
     socket: Arc<Socket>,
-    rx: Receiver<ChannelData>,
-    alive: Arc<AtomicBool>,
-    timeout: Arc<AtomicU8>,
-    stop: Arc<AtomicBool>,
-    quit: Arc<AtomicBool>,
-    sleep: Arc<AtomicBool>,
-    data: Arc<RwLock<ProcessData>>,
-    receive_channel: Option<Receiver<Vec<u8>>>,
-    send_channel: Option<Sender<(Vec<u8>, bool)>>,
-    send_ts: Arc<AtomicI64>,
-    cancel_resend: Arc<AtomicBool>,
-    receiver_handle: Option<Arc<JoinHandle<()>>>,
-    resender_handle: Option<Arc<JoinHandle<()>>>,
-    sender_handle: Option<Arc<JoinHandle<()>>>,
-    receiving_eap_handle: Option<Arc<JoinHandle<()>>>,
-    heartbeat_handle: Option<Arc<JoinHandle<()>>>,
-    thread: Arc<Thread>,
+    rx: watch::Receiver<ChannelData>,
+    data: ProcessData,
+    ready: Option<watch::Sender<bool>>,
 }
 
 impl<'a> Process<'a> {
     pub fn new(
         settings: &'a Settings,
         socket: Arc<Socket>,
-        rx: Receiver<ChannelData>,
+        rx: watch::Receiver<ChannelData>,
         mac: MacAddr,
         ip: IpAddr,
         dns: SocketAddr,
     ) -> Process<'a> {
         Process {
-            alive: Arc::new(AtomicBool::new(false)),
-            timeout: Arc::new(AtomicU8::new(0)),
-            stop: Arc::new(AtomicBool::new(false)),
-            quit: Arc::new(AtomicBool::new(false)),
-            sleep: Arc::new(AtomicBool::new(false)),
-            data: Arc::new(RwLock::new(ProcessData::default())),
-            receive_channel: None,
-            send_channel: None,
-            send_ts: Arc::new(AtomicI64::new(0)),
-            cancel_resend: Arc::new(AtomicBool::new(true)),
             settings,
             socket,
             rx,
             mac,
             ip,
             dns,
-            resender_handle: None,
-            sender_handle: None,
-            receiving_eap_handle: None,
-            heartbeat_handle: None,
-            thread: Arc::new(thread::current()),
-            receiver_handle: None,
+            data: ProcessData::default(),
+            ready: None,
         }
     }
 
-    fn start_receive_thread(&mut self) {
-        if let Some(handle) = &self.receiver_handle {
-            handle.thread().unpark();
-            return;
-        }
-        let (tx, rx) = unbounded::<Vec<u8>>();
-        self.receive_channel = Some(rx);
-        let quit = self.quit.clone();
-        let stop = self.stop.clone();
-        let count = self.settings.retry.count;
-        let interval = self.settings.retry.interval;
-        let socket = self.socket.clone();
-        self.receiver_handle = Some(Arc::new(
-            thread::Builder::new()
-                .name("UDP-Receiver".to_owned())
-                .spawn(move || {
-                    let duration = Duration::from_millis(interval as u64);
-                    let mut cnt = 0;
-                    loop {
-                        if quit.load(Ordering::Relaxed) {
-                            debug!("UDP-Receiver thread quit!");
-                            return;
-                        }
-                        if stop.load(Ordering::Relaxed) {
-                            thread::park();
-                        }
-                        match socket.receive() {
-                            Ok(v) => {
-                                cnt = 0;
-                                if tx.send(v).is_err() {
-                                    error!("Unexpected! Receive channel is disconnected!");
-                                    quit.store(true, Ordering::Release);
-                                }
-                            }
-                            Err(e) => {
-                                error!("Receive error: {e}");
-                                cnt += 1;
-                                if cnt > count {
-                                    quit.store(true, Ordering::Release);
-                                } else {
-                                    thread::sleep(duration);
-                                }
-                            }
-                        }
-                    }
-                })
-                .expect("Can't create UDP-Receiver thread."),
-        ));
+    /// Report actual UDP handshake readiness, independently of EAP success.
+    pub fn with_ready(mut self, ready: watch::Sender<bool>) -> Self {
+        ready.send_replace(false);
+        self.ready = Some(ready);
+        self
     }
 
-    fn start_send_thread(&mut self) {
-        if let Some(handle) = &self.resender_handle {
-            handle.thread().unpark();
-            if let Some(handle) = &self.sender_handle {
-                handle.thread().unpark();
+    fn set_ready(&self, ready: bool) {
+        if let Some(sender) = &self.ready {
+            sender.send_replace(ready);
+        }
+    }
+
+    fn retry_interval(&self) -> Duration {
+        Duration::from_millis(self.settings.retry.interval.max(1) as u64)
+    }
+
+    fn heartbeat_interval(&self) -> Duration {
+        Duration::from_secs(self.settings.heartbeat.udp_timeout.max(1) as u64)
+    }
+
+    async fn transmit(&self, packet: Vec<u8>) -> Result<Pending, State> {
+        self.socket.send(packet.clone()).await.map_err(|e| {
+            error!("UDP send failed: {e}");
+            State::Quit
+        })?;
+        Ok(Pending {
+            packet,
+            retries: 0,
+            deadline: Instant::now() + self.retry_interval(),
+        })
+    }
+
+    /// Wait for current authorization, including an already-published success.
+    /// A stop does not authorize UDP traffic; a closed channel terminates cleanly.
+    async fn wait_for_authorization(&mut self) -> Result<Vec<u8>, State> {
+        loop {
+            let event = self.rx.borrow_and_update().clone();
+            match event.state {
+                State::Success if event.data.len() == 16 => return Ok(event.data),
+                State::Success => {
+                    error!("EAP success contained an invalid MD5 checksum length.");
+                    return Err(State::Stop);
+                }
+                State::Sleep => return Err(State::Sleep),
+                State::Quit => return Err(State::Quit),
+                State::Stop => (),
             }
-            return;
+            if self.rx.changed().await.is_err() {
+                return Err(State::Quit);
+            }
         }
-        let (tx, rx) = unbounded::<(Vec<u8>, bool)>();
-        self.send_channel = Some(tx.clone());
-        let quit = self.quit.clone();
-        let stop = self.stop.clone();
-        let interval = self.settings.retry.interval;
-        let send_ts = self.send_ts.clone();
-        let cancel_resend = self.cancel_resend.clone();
-        let resender_handle = Arc::new(
-            thread::Builder::new()
-                .name("UDP-ReSender".to_owned())
-                .spawn(move || {
-                    loop {
-                        if quit.load(Ordering::Relaxed) {
-                            debug!("UDP-Resender thread quit!");
-                            return;
+    }
+
+    pub async fn start(&mut self) -> State {
+        self.set_ready(false);
+        let state = self.run().await;
+        self.set_ready(false);
+        state
+    }
+
+    async fn run(&mut self) -> State {
+        if !self.ip.is_ipv4() || !self.dns.is_ipv4() {
+            error!("DrCOM UDP session requires IPv4 client and DNS addresses.");
+            return State::Stop;
+        }
+        let checksum = match self.wait_for_authorization().await {
+            Ok(checksum) => checksum,
+            Err(state) => return state,
+        };
+        self.data = ProcessData {
+            cks_md5: checksum,
+            ..ProcessData::default()
+        };
+        let mut phase = Phase::ResponseAlive;
+        let mut pending = match self.transmit(self.misc_alive()).await {
+            Ok(pending) => Some(pending),
+            Err(state) => return state,
+        };
+        let mut heartbeat = Instant::now() + self.heartbeat_interval();
+        let mut established = false;
+        loop {
+            let deadline = pending.as_ref().map_or(heartbeat, |p| p.deadline);
+            tokio::select! {
+                biased;
+                changed = self.rx.changed() => {
+                    if changed.is_err() { return State::Quit; }
+                    let event = self.rx.borrow_and_update().clone();
+                    match event.state {
+                        State::Success if event.data.len() == 16 => {
+                            // Reauthentication invalidates the previous session's checksum.
+                            self.set_ready(false);
+                            established = false;
+                            self.data = ProcessData { cks_md5: event.data, ..ProcessData::default() };
+                            phase = Phase::ResponseAlive;
+                            pending = match self.transmit(self.misc_alive()).await {
+                                Ok(pending) => Some(pending),
+                                Err(state) => return state,
+                            };
                         }
-                        if stop.load(Ordering::Relaxed) {
-                            thread::park();
-                        }
-                        while cancel_resend.load(Ordering::Acquire) {
-                            thread::park();
-                        }
-                        let wait_ts = send_ts.load(Ordering::Acquire)
-                            - Local::now().timestamp_millis()
-                            + (interval as i64);
-                        if wait_ts > 0 {
-                            thread::sleep(Duration::from_millis(wait_ts as u64));
-                        } else if wait_ts > -interval as i64 {
-                            debug!("Resending...");
-                            cancel_resend.store(true, Ordering::Release);
-                            if tx.send((Vec::new(), true)).is_err() {
-                                error!("Unexpected! Send channel is disconnected!");
-                                quit.store(true, Ordering::Release);
-                            }
-                        }
+                        State::Success => return State::Stop,
+                        state => return state,
                     }
-                })
-                .expect("Can't create UDP-ReSender thread."),
-        );
-        self.resender_handle = Some(resender_handle.clone());
-        let quit = self.quit.clone();
-        let stop = self.stop.clone();
-        let socket = self.socket.clone();
-        let count = self.settings.retry.count;
-        let interval = self.settings.retry.interval;
-        let send_ts = self.send_ts.clone();
-        let cancel_resend = self.cancel_resend.clone();
-        self.sender_handle = Some(Arc::new(
-            thread::Builder::new()
-                .name("UDP-Sender".to_owned())
-                .spawn(move || {
-                    let duration = Duration::from_millis(interval as u64);
-                    let mut data = Vec::new();
-                    let mut resend = false;
-                    loop {
-                        if quit.load(Ordering::Relaxed) {
-                            debug!("UDP-Sender thread quit!");
-                            return;
-                        }
-                        if stop.load(Ordering::Relaxed) {
-                            thread::park();
-                        }
-                        match rx.recv() {
-                            Ok((v, b)) => {
-                                debug!("Sender received.");
-                                if !v.is_empty() {
-                                    data = v;
-                                    resend = b;
-                                }
-                            }
-                            Err(_) => {
-                                quit.store(true, Ordering::Release);
-                                error!("Unexpected! Send channel is disconnected!");
+                }
+                _ = sleep_until(deadline) => {
+                    if let Some(ref mut packet) = pending {
+                        if packet.retries >= self.settings.retry.count.max(0) as u32 {
+                            if established && matches!(phase, Phase::HeartbeatAlive | Phase::Heartbeat2 | Phase::Heartbeat4) {
+                                // Some campus servers do not answer every UDP keepalive.
+                                // Preserve healthy EAP authorization and try a new cycle;
+                                // startup/initial handshakes still have strict deadlines.
+                                error!("UDP heartbeat reply timeout; keeping EAP authorization.");
+                                pending = None;
+                                phase = Phase::Idle;
+                                heartbeat = Instant::now() + self.heartbeat_interval();
                                 continue;
                             }
+                            error!("UDP response timeout after {} retries.", packet.retries);
+                            return State::Stop;
                         }
-                        let mut cnt = 0;
-                        loop {
-                            if quit.load(Ordering::Relaxed) || stop.load(Ordering::Relaxed) {
-                                break;
-                            }
-                            debug!("Sender is sending packet: {}", hex::encode(&data[..]));
-                            match socket.send(data.clone()) {
-                                Ok(_) => {
-                                    send_ts
-                                        .store(Local::now().timestamp_millis(), Ordering::Release);
-                                    cancel_resend.store(!resend, Ordering::Release);
-                                    if resend {
-                                        resender_handle.thread().unpark();
-                                    }
-                                    break;
-                                }
-                                Err(e) => {
-                                    error!("Send error: {e}");
-                                    cnt += 1;
-                                    if cnt > count {
-                                        quit.store(true, Ordering::Release);
-                                    } else {
-                                        thread::sleep(duration);
-                                    }
-                                }
-                            }
+                        if let Err(e) = self.socket.send(packet.packet.clone()).await {
+                            error!("UDP resend failed: {e}");
+                            return State::Quit;
                         }
-                        debug!("Sender sent packet.");
-                    }
-                })
-                .expect("Can't create UDP-Sender thread."),
-        ));
-    }
-
-    fn receive(&self) -> Option<Vec<u8>> {
-        let channel = self.receive_channel.as_ref().unwrap();
-        match channel.try_recv() {
-            Ok(v) => Some(v),
-            Err(TryRecvError::Disconnected) => {
-                self.quit.store(true, Ordering::Release);
-                error!("Unexpected! Receive channel is disconnected!");
-                None
-            }
-            Err(TryRecvError::Empty) => None,
-        }
-    }
-
-    fn send(&self, data: Vec<u8>, resend: bool) {
-        let channel = self.send_channel.as_ref().unwrap();
-        debug!("Will blocking send...");
-        if channel.send((data, resend)).is_err() {
-            self.quit.store(true, Ordering::Release);
-            error!("Unexpected! Send channel is disconnected!");
-            return;
-        }
-        debug!("Sent.");
-    }
-
-    fn start_receive_eap_thread(&mut self) {
-        if let Some(handle) = &self.receiving_eap_handle {
-            handle.thread().unpark();
-            return;
-        }
-        info!("Start to receive message from EAP.");
-        let quit = self.quit.clone();
-        let stop = self.stop.clone();
-        let sleep = self.sleep.clone();
-        let rx = self.rx.clone();
-        let data = self.data.clone();
-        let thread = self.thread.clone();
-        self.receiving_eap_handle = Some(Arc::new(
-            thread::Builder::new()
-                .name("EAPtoUDP".to_owned())
-                .spawn(move || {
-                    loop {
-                        if quit.load(Ordering::Relaxed) {
-                            info!("Stop receiving message from EAP.");
-                            debug!("EAPtoUDP thread quit!");
-                            return;
-                        }
-                        if stop.load(Ordering::Relaxed) {
-                            thread.unpark();
-                            thread::park();
-                        }
-                        match rx.recv() {
-                            Ok(x) => match x.state {
-                                State::Success => {
-                                    info!("Receive SUCCESS from EAP.");
-                                    loop {
-                                        if let Ok(mut r) = data.try_write() {
-                                            r.cks_md5 = x.data;
-                                            info!("cks_md5(md5): {}", hex::encode(&r.cks_md5));
-                                            break;
-                                        }
-                                        util::sleep();
-                                    }
-                                    thread.unpark();
-                                }
-                                State::Stop => {
-                                    info!("Receive STOP from EAP.");
-                                    stop.store(true, Ordering::Release);
-                                }
-                                State::Sleep => {
-                                    info!("Receive SLEEP from EAP.");
-                                    sleep.store(true, Ordering::Release);
-                                    stop.store(true, Ordering::Release);
-                                }
-                                State::Quit => {
-                                    info!("Receive QUIT from EAP.");
-                                    quit.store(true, Ordering::Release);
-                                }
-                            },
-                            Err(_) => {
-                                error!("Unexpected! EAPtoUDP channel is closed.");
-                                quit.store(true, Ordering::Release);
-                            }
-                        }
-                    }
-                })
-                .expect("Can't create EAPtoUDP thread."),
-        ));
-    }
-
-    fn cancel_resend(&self) {
-        self.cancel_resend.store(true, Ordering::Release);
-    }
-
-    pub fn start(&mut self) -> State {
-        self.thread = Arc::new(thread::current());
-        self.stop.store(false, Ordering::Release);
-        self.start_receive_eap_thread();
-        self.start_receive_thread();
-        self.start_send_thread();
-        self.login_start();
-        while !self.stop.load(Ordering::Relaxed) {
-            if self.quit.load(Ordering::Relaxed) {
-                debug!("UDP-Process thread quit!");
-                self.start_receive_eap_thread();
-                self.start_receive_thread();
-                self.start_send_thread();
-                self.start_heartbeat_thread();
-                return State::Quit;
-            }
-            if self
-                .alive
-                .compare_exchange(true, false, Ordering::Acquire, Ordering::Acquire)
-                == Ok(true)
-            {
-                self.send_alive();
-            }
-            let raw = match self.receive() {
-                Some(v) => v,
-                None => {
-                    sleep();
-                    continue;
-                }
-            };
-            debug!("Receive packet: {}", hex::encode(&raw[..]));
-            match HeaderType::from_vec(&raw[..]) {
-                HeaderType::Invalid => continue,
-                HeaderType::Unknown => error!("Unknown packet: {}", hex::encode(&raw[..])),
-                HeaderType::UnknownMisc => error!("Unknown Misc packet: {}", hex::encode(&raw[..])),
-                HeaderType::UnknownMessage => {
-                    error!("Unknown Message packet: {}", hex::encode(&raw[..]))
-                }
-                HeaderType::MiscAlive => {
-                    error!("Unexpected packet MiscAlive: {}", hex::encode(&raw[..]))
-                }
-                HeaderType::MiscResponseAlive => {
-                    self.cancel_resend();
-                    info!("Receive MiscResponseAlive.");
-                    loop {
-                        if let Ok(mut r) = self.data.try_write() {
-                            r.flux = Vec::from(&raw[8..12]);
-                            break;
-                        }
-                        sleep();
-                    }
-                    self.send_misc_info();
-                }
-                HeaderType::MiscInfo => {
-                    error!("Unexpected packet MiscInfo: {}", hex::encode(&raw[..]))
-                }
-                HeaderType::MiscResponseInfo => {
-                    self.cancel_resend();
-                    info!("Receive MiscResponseInfo.");
-                    self.on_response_info(raw);
-                }
-                HeaderType::MiscHeartbeat => {
-                    self.cancel_resend();
-                    match HeartbeatType::from_vec(&raw[..]).0 {
-                        2 => {
-                            info!("Receive MiscHeartbeat2.");
-                            loop {
-                                if let Ok(mut r) = self.data.try_write() {
-                                    r.flux = Vec::from(&raw[16..20]);
-                                    break;
-                                }
-                                sleep();
-                            }
-                            self.send_misc_heartbeat_3();
-                        }
-                        4 => {
-                            info!("Receive MiscHeartbeat4.");
-                            self.timeout.store(0, Ordering::Release);
-                            info!("Heartbeat done.");
-                        }
-                        x => error!(
-                            "Unexpected packet MiscHeartbeat Type{}: {}",
-                            x,
-                            hex::encode(&raw[..])
-                        ),
+                        packet.retries += 1;
+                        packet.deadline = Instant::now() + self.retry_interval();
+                    } else {
+                        let packet = if phase == Phase::StartupDelay {
+                            phase = Phase::StartupAck;
+                            self.startup_heartbeat()
+                        } else {
+                            phase = Phase::HeartbeatAlive;
+                            self.alive()
+                        };
+                        pending = match self.transmit(packet).await {
+                            Ok(pending) => Some(pending),
+                            Err(state) => return state,
+                        };
                     }
                 }
-                HeaderType::MiscResponseHeartbeatAlive => {
-                    self.cancel_resend();
-                    info!("Receive MiscResponseHeartbeatAlive.");
-                    self.send_misc_heartbeat_1();
-                }
-                HeaderType::MessageServerInformation => {
-                    let (s, _) = encoding_rs::GB18030.decode_without_bom_handling(&raw[4..]);
-                    info!("Server Information: {s}");
+                received = self.socket.receive() => {
+                    let raw = match received {
+                        Ok(raw) => raw,
+                        Err(e) => { error!("UDP receive failed: {e}"); return State::Quit; }
+                    };
+                    let next = match (phase, HeaderType::from_vec(&raw)) {
+                        (Phase::ResponseAlive, HeaderType::MiscResponseAlive) if raw.len() >= 12 => {
+                            self.data.flux = raw[8..12].to_vec();
+                            phase = Phase::ResponseInfo;
+                            Some(self.misc_info())
+                        }
+                        (Phase::ResponseInfo, HeaderType::MiscResponseInfo) if raw.len() >= 32 => {
+                            self.data.decrypted_from_misc_response_info = raw[16..32].to_vec();
+                            decrypt_info(&mut self.data.decrypted_from_misc_response_info);
+                            if self.settings.profile == Profile::Windows31 {
+                                phase = Phase::StartupDelay;
+                                pending = None;
+                                heartbeat = Instant::now() + Duration::from_millis(1400);
+                                None
+                            } else {
+                                phase = Phase::HeartbeatAlive;
+                                Some(self.alive())
+                            }
+                        }
+                        (Phase::StartupAck, HeaderType::MiscHeartbeat) if HeartbeatType::from_vec(&raw).0 == 6 => {
+                            info!("UDP startup heartbeat completed.");
+                            phase = Phase::Idle;
+                            pending = None;
+                            established = true;
+                            heartbeat = Instant::now() + self.heartbeat_interval();
+                            self.set_ready(true);
+                            None
+                        }
+                        (Phase::HeartbeatAlive, HeaderType::MiscResponseHeartbeatAlive) => {
+                            phase = Phase::Heartbeat2;
+                            Some(self.misc_heartbeat_1())
+                        }
+                        (Phase::Heartbeat2, HeaderType::MiscHeartbeat) if raw.len() >= 20 && HeartbeatType::from_vec(&raw).0 == 2 => {
+                            self.data.flux = raw[16..20].to_vec();
+                            phase = Phase::Heartbeat4;
+                            Some(self.misc_heartbeat_3())
+                        }
+                        (Phase::Heartbeat4, HeaderType::MiscHeartbeat) if raw.len() >= 6 && HeartbeatType::from_vec(&raw).0 == 4 => {
+                            info!("UDP heartbeat completed.");
+                            established = true;
+                            self.set_ready(true);
+                            phase = Phase::Idle;
+                            pending = None;
+                            heartbeat = Instant::now() + self.heartbeat_interval();
+                            None
+                        }
+                        (_, HeaderType::MessageServerInformation) if raw.len() >= 4 => {
+                            let (message, _) = encoding_rs::GB18030.decode_without_bom_handling(&raw[4..]);
+                            info!("Server information: {message}");
+                            None
+                        }
+                        _ => { debug!("Ignoring malformed or out-of-order UDP datagram."); None }
+                    };
+                    if let Some(packet) = next {
+                        pending = match self.transmit(packet).await {
+                            Ok(pending) => Some(pending),
+                            Err(state) => return state,
+                        };
+                    }
                 }
             }
         }
-        if self.sleep.load(Ordering::Relaxed) {
-            State::Sleep
+    }
+
+    fn misc_alive(&self) -> Vec<u8> {
+        let mut packet = BytesMut::with_capacity(8);
+        MiscAlive::append_to(&mut packet);
+        packet.to_vec()
+    }
+
+    fn misc_info(&mut self) -> Vec<u8> {
+        let mut packet = BytesMut::with_capacity(244);
+        let fixed = &self.settings.data.misc_info;
+        let info = MiscInfo {
+            mac: self.mac,
+            ip: self.settings.udp_ip.map_or(self.ip, IpAddr::V4),
+            unknown1: fixed.unknown1.clone(),
+            flux: self.data.flux.clone(),
+            cks32_param: fixed.cks32_param.clone(),
+            username: self.settings.username.clone(),
+            hostname: self.settings.hostname.clone(),
+            dns1: self.dns.ip(),
+            dns2: IpAddr::V4(self.settings.dns2),
+            unknown2: fixed.unknown2.clone(),
+            os_major: fixed.os_major.clone(),
+            os_minor: fixed.os_minor.clone(),
+            os_build: fixed.os_build.clone(),
+            os_unknown: fixed.os_unknown.clone(),
+            version: fixed.version.clone(),
+            hash: fixed.hash.clone(),
+        };
+        let checksum = if self.settings.profile == Profile::Windows31 {
+            info.append_windows31_to(
+                &mut packet,
+                IpAddr::V4(self.settings.gateway),
+                &fixed.trailer,
+            )
         } else {
-            State::Stop
+            info.append_to(&mut packet)
+        };
+        self.data.cks_md5[..4].copy_from_slice(&checksum.to_le_bytes());
+        packet.to_vec()
+    }
+
+    fn startup_heartbeat(&self) -> Vec<u8> {
+        let mut packet = BytesMut::with_capacity(40);
+        StartupHeartbeat::append_to(&mut packet, &random_vec(2));
+        packet.to_vec()
+    }
+
+    fn misc_heartbeat_1(&mut self) -> Vec<u8> {
+        self.data.counter = self.data.counter.wrapping_add(1);
+        self.data.rnd = random_vec(2);
+        let mut packet = BytesMut::with_capacity(40);
+        MiscHeartbeat1 {
+            counter: self.data.counter,
+            rnd: self.data.rnd.clone(),
+            flux: self.data.flux.clone(),
         }
+        .append_to(&mut packet);
+        packet.to_vec()
     }
 
-    #[inline]
-    fn login_start(&mut self) {
-        self.alive.store(false, Ordering::Release);
-        self.timeout.store(0, Ordering::Release);
-        self.sleep.store(false, Ordering::Release);
-        self.send_ts.store(0, Ordering::Release);
-        info!("Waiting SUCCESS message from EAP.");
-        thread::park();
-        self.send_misc_alive()
-    }
-
-    fn on_response_info(&mut self, raw: Vec<u8>) {
-        let mut v = raw[16..32].to_vec();
-        decrypt_info(&mut v);
-        loop {
-            if let Ok(mut r) = self.data.try_write() {
-                r.decrypted_from_misc_response_info = v;
-                break;
-            }
-            sleep();
+    fn misc_heartbeat_3(&mut self) -> Vec<u8> {
+        self.data.counter = self.data.counter.wrapping_add(1);
+        let mut packet = BytesMut::with_capacity(40);
+        MiscHeartbeat3 {
+            counter: self.data.counter,
+            rnd: self.data.rnd.clone(),
+            flux: self.data.flux.clone(),
+            ip: self.settings.udp_ip.map_or(self.ip, IpAddr::V4),
         }
-        self.start_heartbeat_thread();
+        .append_to(&mut packet);
+        packet.to_vec()
     }
 
-    fn start_heartbeat_thread(&mut self) {
-        if let Some(handle) = &self.heartbeat_handle {
-            handle.thread().unpark();
-            return;
+    fn alive(&self) -> Vec<u8> {
+        let mut packet = BytesMut::with_capacity(38);
+        Alive {
+            cks_md5: self.data.cks_md5.clone(),
+            decrypted_from_misc_response_info: self.data.decrypted_from_misc_response_info.clone(),
         }
-        let quit = self.quit.clone();
-        let stop = self.stop.clone();
-        let alive = self.alive.clone();
-        let timeout = self.timeout.clone();
-        let udp_timeout = self.settings.heartbeat.udp_timeout;
-        let count = min(self.settings.retry.count, u8::MAX as i32) as u8;
-        self.heartbeat_handle = Some(Arc::new(thread::Builder::new().name("UDP-Heartbeat".to_owned()).spawn(move || {
-            let duration = std::time::Duration::from_secs(udp_timeout as u64);
-            loop {
-                if quit.load(Ordering::Relaxed) {
-                    debug!("UDP-Heartbeat thread quit!");
-                    return;
-                }
-                if stop.load(Ordering::Relaxed) {
-                    thread::park();
-                }
-                alive.store(true, Ordering::Release);
-                thread::sleep(duration);
-                let mut cnt = timeout.load(Ordering::Relaxed);
-                if cnt > count {
-                    error!("Heartbeat timeout. No Misc Heartbeat packet received for {}s, but ignored.", udp_timeout * cnt as i32);
-                    cnt = 0;
-                }
-                timeout.store(cnt + 1, Ordering::Release);
-            }
-        }).expect("Can't create UDP-Heartbeat thread.")));
-    }
-
-    fn send_misc_alive(&mut self) {
-        info!("Send MiscAlive.");
-        let data = &mut BytesMut::with_capacity(8);
-        MiscAlive::append_to(data);
-        self.send(data.to_vec(), true)
-    }
-
-    fn send_misc_info(&mut self) {
-        info!("Send MiscInfo.");
-        let data = &mut BytesMut::with_capacity(244);
-        let settings = &self.settings;
-        let fixed = &settings.data.misc_info;
-        loop {
-            if let Ok(mut dt) = self.data.try_write() {
-                let cks = (MiscInfo {
-                    mac: self.mac,
-                    ip: self.ip,
-                    unknown1: fixed.unknown1.clone(),
-                    flux: dt.flux.clone(),
-                    cks32_param: fixed.cks32_param.clone(),
-                    username: settings.username.clone(),
-                    hostname: settings.hostname.clone(),
-                    dns1: self.dns.ip(),
-                    dns2: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
-                    unknown2: fixed.unknown2.clone(),
-                    os_major: fixed.os_major.clone(),
-                    os_minor: fixed.os_minor.clone(),
-                    os_build: fixed.os_build.clone(),
-                    os_unknown: fixed.os_unknown.clone(),
-                    version: fixed.version.clone(),
-                    hash: fixed.hash.clone(),
-                })
-                .append_to(data);
-                info!("calculate cks and apply to md5.");
-                let cks_array = cks.to_le_bytes();
-                dt.cks_md5[..cks_array.len()].copy_from_slice(&cks_array);
-                break;
-            }
-            sleep();
-        }
-        self.send(data.to_vec(), true)
-    }
-
-    fn send_misc_heartbeat_1(&mut self) {
-        info!("Send MiscHeartbeat1.");
-        let data = &mut BytesMut::with_capacity(40);
-        loop {
-            if let Ok(mut dt) = self.data.try_write() {
-                dt.counter += 1;
-                dt.rnd = random_vec(2);
-                MiscHeartbeat1 {
-                    counter: dt.counter,
-                    rnd: dt.rnd.clone(),
-                    flux: dt.flux.clone(),
-                }
-                .append_to(data);
-                break;
-            }
-            sleep();
-        }
-        self.send(data.to_vec(), true)
-    }
-
-    fn send_misc_heartbeat_3(&mut self) {
-        info!("Send MiscHeartbeat3.");
-        let data = &mut BytesMut::with_capacity(40);
-        loop {
-            if let Ok(mut dt) = self.data.try_write() {
-                dt.counter += 1;
-                MiscHeartbeat3 {
-                    counter: dt.counter,
-                    rnd: dt.rnd.clone(),
-                    flux: dt.flux.clone(),
-                    ip: self.ip,
-                }
-                .append_to(data);
-                break;
-            }
-            sleep();
-        }
-        self.send(data.to_vec(), true)
-    }
-
-    fn send_alive(&mut self) {
-        info!("Send Alive.");
-        let data = &mut BytesMut::with_capacity(40);
-        loop {
-            if let Ok(dt) = self.data.try_read() {
-                Alive {
-                    cks_md5: dt.cks_md5.clone(),
-                    decrypted_from_misc_response_info: dt.decrypted_from_misc_response_info.clone(),
-                }
-                .append_to(data);
-                break;
-            }
-            sleep();
-        }
-        self.send(data.to_vec(), true)
+        .append_to(&mut packet);
+        packet.to_vec()
     }
 }
 
-#[test]
-fn test() {
-    dbg!(encoding_rs::GB18030.decode_with_bom_removal(hex::decode("d7d432303139c4ea39d4c23239c8d5c6f0a3acc8e7d0e8d4dacee5c9bdd0a3c7f8b0ecc0edcdf8c2e7d6d0d0c4cfe0b9d8d2b5cef1a3acc7ebd2c6b2bdd6c1cee5c9bdd0a3c7f831bac5c2a5caa6c9fab7fecef1d6d0d0c4d2bbc2a5b6abb2e0b4f3ccfc31d6c135bac5b4b0bfdaa1a3cfeacfb8d0c5cfa2c7ebbcfb687474703a2f2f7765622e736375742e6564752e636e2f323031392f303932352f633135323835613333353931312f706167652e68746d00").unwrap().as_slice()));
-    dbg!(encoding_rs::GB18030.decode_with_bom_removal(hex::decode("d6c2d0a3d4b0cdf8d3c3bba7a3accfd6d2d1b7a2b2bcc6bbb9fbb5e7c4d4d0c2b0e6c8cfd6a4bfcdbba7b6cba3acd6a7b3d6a1be6d61634f532031302e313520436174616c696e61a1bfa3acbfc9b5bd20687474703a2f2f3230322e33382e3139332e36352f20cfc2d4d8a1a3cad7b4ceb0b2d7b0c7b0a3acd0e8cfc8b6cfbfaad3d0cfdfc1acbdd3bbf2b0ceb3f6cdf8cfdfa3acc8bbbaf3b5c7c2bdcedecfdfcdf8c2e7a3acd4d9bdf8d0d0b0b2d7b0a1a3c8e7c4fad3d0c6e4cbfcd2c9cecaa3acbbb6d3add6").unwrap().as_slice()));
+impl Drop for Process<'_> {
+    fn drop(&mut self) {
+        self.set_ready(false);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::net::UdpSocket;
+    use tokio::task::JoinHandle;
+    use tokio::time::timeout;
+
+    struct Session {
+        control: watch::Sender<ChannelData>,
+        server: UdpSocket,
+        task: JoinHandle<State>,
+    }
+
+    async fn session(initial: State, retry_count: i32, interval: i32) -> Session {
+        let mut settings = Settings {
+            username: "201836431154".into(),
+            hostname: "SeaLoong".into(),
+            ..Settings::default()
+        };
+        settings.retry.count = retry_count;
+        settings.retry.interval = interval;
+        settings.heartbeat.udp_timeout = 1;
+        session_settings(initial, settings, None).await
+    }
+
+    async fn session_settings(
+        initial: State,
+        settings: Settings,
+        ready: Option<watch::Sender<bool>>,
+    ) -> Session {
+        let server = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let client = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        client.connect(server.local_addr().unwrap()).await.unwrap();
+        server.connect(client.local_addr().unwrap()).await.unwrap();
+        let (control, rx) = watch::channel(ChannelData {
+            state: initial,
+            data: vec![0x55; 16],
+        });
+        let task = tokio::spawn(async move {
+            let (mac, local, dns) = if settings.profile == Profile::Windows31 {
+                (MacAddr(2, 0, 0, 0, 0, 9), "192.0.2.10", "192.0.2.53:53")
+            } else {
+                (
+                    MacAddr(0xb0, 0x25, 0xaa, 0x28, 0x6d, 0xb9),
+                    "125.217.254.225",
+                    "202.38.193.33:53",
+                )
+            };
+            let mut process = Process::new(
+                &settings,
+                Arc::new(Socket::new(client)),
+                rx,
+                mac,
+                local.parse().unwrap(),
+                dns.parse().unwrap(),
+            );
+            if let Some(ready) = ready {
+                process = process.with_ready(ready);
+            }
+            process.start().await
+        });
+        Session {
+            control,
+            server,
+            task,
+        }
+    }
+
+    async fn receive(server: &UdpSocket) -> Vec<u8> {
+        let mut buffer = [0u8; 2048];
+        let size = timeout(Duration::from_secs(2), server.recv(&mut buffer))
+            .await
+            .expect("client packet timed out")
+            .unwrap();
+        buffer[..size].to_vec()
+    }
+
+    fn response(kind: u8, length: usize) -> Vec<u8> {
+        let mut packet = vec![0u8; length];
+        packet[0] = 7;
+        packet[2] = length as u8;
+        packet[4] = kind;
+        packet
+    }
+
+    async fn login(server: &UdpSocket) -> Vec<u8> {
+        assert_eq!(
+            receive(server).await,
+            hex::decode("0700080001000000").unwrap()
+        );
+        let mut challenge = response(2, 12);
+        challenge[8..12].copy_from_slice(&hex::decode("3bab4e04").unwrap());
+        server.send(&challenge).await.unwrap();
+        let info = receive(server).await;
+        let expected = "0701f400030cb025aa286db97dd9fee10222002a3bab4e04de833b02000000003230313833363433313135345365614c6f6f6e67000000000000000000000000000000000000000000000000ca26c12100000000000000000000000000000000940000000600000002000000f0230000020000004472434f4d0096022a0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000034656238316663303438613535383562376466653137383331353532343161333238623130336336000000000000000000000000000000000000000000000000";
+        assert_eq!(
+            info,
+            hex::decode(expected).unwrap(),
+            "MiscInfo must match legacy wire fixture"
+        );
+        let mut info_response = response(4, 32);
+        info_response[16..32]
+            .copy_from_slice(&hex::decode("4439d8edac314b07dd8c5f3bef0f04d8").unwrap());
+        server.send(&info_response).await.unwrap();
+        let alive = receive(server).await;
+        assert_eq!(alive.len(), 38);
+        assert_eq!(alive[0], 0xff);
+        assert_eq!(&alive[1..5], &info[24..28]);
+        assert_eq!(&alive[5..17], &[0x55; 12]);
+        assert_eq!(&alive[17..20], &[0; 3]);
+        assert_eq!(
+            &alive[20..36],
+            hex::decode("4472636fca26d283dd197dd9fee1016c").unwrap()
+        );
+        alive
+    }
+
+    async fn heartbeat(server: &UdpSocket) -> Vec<u8> {
+        server.send(&response(6, 8)).await.unwrap();
+        let heartbeat1 = receive(server).await;
+        assert_eq!(heartbeat1.len(), 40);
+        assert_eq!(&heartbeat1[..8], &[7, 1, 40, 0, 11, 1, 220, 2]);
+        let mut heartbeat2 = response(11, 40);
+        heartbeat2[5] = 2;
+        heartbeat2[16..20].copy_from_slice(&[11, 22, 33, 44]);
+        server.send(&heartbeat2).await.unwrap();
+        let heartbeat3 = receive(server).await;
+        assert_eq!(heartbeat3.len(), 40);
+        assert_eq!(&heartbeat3[..8], &[7, 2, 40, 0, 11, 3, 220, 2]);
+        assert_eq!(&heartbeat3[8..10], &heartbeat1[8..10]);
+        assert_eq!(&heartbeat3[16..20], &[11, 22, 33, 44]);
+        assert_eq!(&heartbeat3[28..32], &[125, 217, 254, 225]);
+        let mut heartbeat4 = response(11, 40);
+        heartbeat4[5] = 4;
+        server.send(&heartbeat4).await.unwrap();
+        heartbeat3
+    }
+
+    #[tokio::test]
+    async fn e2e_waits_for_eap_success_and_stops_immediately() {
+        let session = session(State::Stop, 2, 1000).await;
+        let mut buffer = [0u8; 64];
+        assert!(
+            timeout(Duration::from_millis(15), session.server.recv(&mut buffer))
+                .await
+                .is_err()
+        );
+        session
+            .control
+            .send(ChannelData {
+                state: State::Success,
+                data: vec![1; 16],
+            })
+            .unwrap();
+        assert_eq!(
+            receive(&session.server).await,
+            hex::decode("0700080001000000").unwrap()
+        );
+        session
+            .control
+            .send(ChannelData {
+                state: State::Stop,
+                data: Vec::new(),
+            })
+            .unwrap();
+        assert_eq!(
+            timeout(Duration::from_secs(1), session.task)
+                .await
+                .unwrap()
+                .unwrap(),
+            State::Stop
+        );
+    }
+
+    #[tokio::test]
+    async fn e2e_login_and_heartbeat_match_legacy_packets() {
+        let session = session(State::Success, 2, 1000).await;
+        login(&session.server).await;
+        heartbeat(&session.server).await;
+        session
+            .control
+            .send(ChannelData {
+                state: State::Quit,
+                data: Vec::new(),
+            })
+            .unwrap();
+        assert_eq!(
+            timeout(Duration::from_secs(1), session.task)
+                .await
+                .unwrap()
+                .unwrap(),
+            State::Quit
+        );
+    }
+
+    #[tokio::test]
+    async fn e2e_timeout_retries_same_packet_then_returns_stop() {
+        let session = session(State::Success, 2, 15).await;
+        let initial = receive(&session.server).await;
+        assert_eq!(receive(&session.server).await, initial);
+        assert_eq!(receive(&session.server).await, initial);
+        assert_eq!(
+            timeout(Duration::from_secs(1), session.task)
+                .await
+                .unwrap()
+                .unwrap(),
+            State::Stop
+        );
+        let mut buffer = [0u8; 64];
+        assert!(
+            timeout(Duration::from_millis(20), session.server.recv(&mut buffer))
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn e2e_ignores_truncated_and_out_of_order_responses_without_losing_retry() {
+        let session = session(State::Success, 1, 40).await;
+        let initial = receive(&session.server).await;
+        for packet in [
+            Vec::new(),
+            vec![7],
+            response(2, 5),
+            response(4, 32),
+            response(6, 8),
+            response(11, 5),
+        ] {
+            session.server.send(&packet).await.unwrap();
+        }
+        assert_eq!(receive(&session.server).await, initial);
+        assert_eq!(
+            timeout(Duration::from_secs(1), session.task)
+                .await
+                .unwrap()
+                .unwrap(),
+            State::Stop
+        );
+    }
+
+    #[tokio::test]
+    async fn e2e_reauthentication_restarts_handshake() {
+        let session = session(State::Success, 2, 1000).await;
+        login(&session.server).await;
+        session
+            .control
+            .send(ChannelData {
+                state: State::Success,
+                data: vec![7; 16],
+            })
+            .unwrap();
+        assert_eq!(
+            receive(&session.server).await,
+            hex::decode("0700080001000000").unwrap()
+        );
+        session
+            .control
+            .send(ChannelData {
+                state: State::Sleep,
+                data: Vec::new(),
+            })
+            .unwrap();
+        assert_eq!(
+            timeout(Duration::from_secs(1), session.task)
+                .await
+                .unwrap()
+                .unwrap(),
+            State::Sleep
+        );
+    }
+
+    #[tokio::test]
+    async fn e2e_closed_eap_channel_terminates_pending_io() {
+        let session = session(State::Success, 2, 1000).await;
+        receive(&session.server).await;
+        drop(session.control);
+        assert_eq!(
+            timeout(Duration::from_secs(1), session.task)
+                .await
+                .unwrap()
+                .unwrap(),
+            State::Quit
+        );
+    }
+
+    #[tokio::test]
+    async fn invalid_authorization_checksum_is_rejected_without_network_traffic() {
+        let session = session(State::Stop, 2, 1000).await;
+        session
+            .control
+            .send(ChannelData {
+                state: State::Success,
+                data: vec![1; 3],
+            })
+            .unwrap();
+        assert_eq!(
+            timeout(Duration::from_secs(1), session.task)
+                .await
+                .unwrap()
+                .unwrap(),
+            State::Stop
+        );
+        let mut buffer = [0u8; 64];
+        assert!(
+            timeout(Duration::from_millis(10), session.server.recv(&mut buffer))
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn e2e_abort_cancels_pending_retry_without_background_tasks() {
+        let session = session(State::Success, 2, 30).await;
+        receive(&session.server).await;
+        session.task.abort();
+        assert!(session.task.await.unwrap_err().is_cancelled());
+        let mut buffer = [0u8; 64];
+        assert!(
+            timeout(Duration::from_millis(80), session.server.recv(&mut buffer))
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn e2e_lost_periodic_replies_keep_eap_authorized_and_retry_new_cycles() {
+        let session = session(State::Success, 1, 30).await;
+        login(&session.server).await;
+        heartbeat(&session.server).await;
+        for _ in 0..2 {
+            let alive = receive(&session.server).await;
+            assert_eq!(alive[0], 0xff);
+            assert_eq!(alive.len(), 38);
+            assert_eq!(
+                receive(&session.server).await,
+                alive,
+                "retry must preserve timestamp and checksum bytes"
+            );
+            assert_eq!(session.control.borrow().state, State::Success);
+            assert!(
+                !session.task.is_finished(),
+                "UDP loss must not terminate healthy authorization"
+            );
+        }
+        session.control.send_replace(ChannelData::stopped());
+        assert_eq!(
+            timeout(Duration::from_secs(1), session.task)
+                .await
+                .unwrap()
+                .unwrap(),
+            State::Stop
+        );
+    }
+
+    fn windows31_settings() -> Settings {
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let path = std::env::temp_dir().join(format!(
+            "drcom4scut-udp-profile-{}-{}.yml",
+            std::process::id(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        let yaml = "username: example00000\npassword: fake-test-password\nhostname: test-host\nprofile: windows31\nudp_ip: 192.0.2.9\ngateway: 192.0.2.1\ndns2: 192.0.2.54\nretry: {count: 1, interval: 5000}\nheartbeat: {udp_timeout: 1}\ndata: {misc_info: {trailer: '2001025030007004aa0cb7dee93f3c65'}}\n";
+        std::fs::write(&path, yaml).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        let matches = crate::settings::command()
+            .try_get_matches_from([
+                "drcom4scut",
+                "--config",
+                path.to_str().unwrap(),
+                "--check-config",
+            ])
+            .unwrap();
+        let settings = Settings::from_matches(&matches).unwrap();
+        std::fs::remove_file(path).unwrap();
+        settings
+    }
+
+    async fn windows31_info_exchange(server: &UdpSocket) -> Vec<u8> {
+        assert_eq!(receive(server).await, [7, 0, 8, 0, 1, 0, 0, 0]);
+        let mut alive_response = response(2, 12);
+        alive_response[8..12].copy_from_slice(&[1, 2, 3, 4]);
+        server.send(&alive_response).await.unwrap();
+        let info = receive(server).await;
+        assert_eq!(info.len(), 260);
+        assert_eq!(&info[..6], &[7, 1, 4, 1, 3, 12]);
+        assert_eq!(
+            &info[12..16],
+            &[192, 0, 2, 9],
+            "payload override must not use the physical source"
+        );
+        assert_eq!(&info[16..20], &[2, 0x22, 0, 0x31]);
+        assert_eq!(&info[80..88], &[192, 0, 2, 1, 192, 0, 2, 54]);
+        assert!(info[96..116].iter().all(|byte| *byte == 0));
+        assert_eq!(
+            &info[244..],
+            hex::decode("2001025030007004aa0cb7dee93f3c65").unwrap()
+        );
+        let mut reply = response(4, 32);
+        reply[16..32].copy_from_slice(&hex::decode("4439d8edac314b07dd8c5f3bef0f04d8").unwrap());
+        server.send(&reply).await.unwrap();
+        info
+    }
+
+    #[tokio::test]
+    async fn e2e_windows31_gates_readiness_on_distinct_startup_exchange() {
+        let (ready_tx, mut ready) = watch::channel(false);
+        let session = session_settings(State::Success, windows31_settings(), Some(ready_tx)).await;
+        let info = windows31_info_exchange(&session.server).await;
+        assert!(
+            timeout(Duration::from_millis(100), receive(&session.server))
+                .await
+                .is_err(),
+            "startup exchange must respect its delay, not send a legacy Alive immediately"
+        );
+        let startup = receive(&session.server).await;
+        assert_eq!(startup.len(), 40);
+        assert_eq!(&startup[..8], &[7, 0, 40, 0, 11, 1, 15, 39]);
+        assert!(!*ready.borrow_and_update());
+        session.server.send(&response(6, 8)).await.unwrap(); // normal Alive ACK is not startup ACK
+        assert!(
+            timeout(Duration::from_millis(10), ready.wait_for(|value| *value))
+                .await
+                .is_err()
+        );
+        let mut ack = response(11, 6);
+        ack[5] = 6;
+        session.server.send(&ack).await.unwrap();
+        assert!(
+            *timeout(Duration::from_secs(1), ready.wait_for(|value| *value))
+                .await
+                .unwrap()
+                .unwrap()
+        );
+        let alive = receive(&session.server).await;
+        assert_eq!(alive.len(), 38);
+        assert_eq!(&alive[1..5], &info[24..28]);
+        session.server.send(&response(6, 8)).await.unwrap();
+        let first = receive(&session.server).await;
+        assert_eq!(&first[..8], &[7, 1, 40, 0, 11, 1, 220, 2]);
+        let mut second = response(11, 40);
+        second[5] = 2;
+        second[16..20].copy_from_slice(&[9, 8, 7, 6]);
+        session.server.send(&second).await.unwrap();
+        let third = receive(&session.server).await;
+        assert_eq!(&third[28..32], &[192, 0, 2, 9]);
+        assert_eq!(&third[8..10], &first[8..10]);
+        second[5] = 4;
+        session.server.send(&second).await.unwrap();
+        session.task.abort();
+        assert!(session.task.await.unwrap_err().is_cancelled());
+        assert!(!*ready.borrow(), "dropping a session must clear readiness");
+    }
+
+    #[tokio::test]
+    async fn e2e_windows31_startup_timeout_remains_strict_and_cannot_authorize() {
+        let (ready_tx, ready) = watch::channel(false);
+        let mut settings = windows31_settings();
+        settings.retry.count = 0;
+        // The real UDP handshake must not race a short timer under QEMU or
+        // overloaded CI. Only the post-startup timeout is under test here.
+        settings.retry.interval = 5000;
+        let session = session_settings(State::Success, settings, Some(ready_tx)).await;
+        windows31_info_exchange(&session.server).await;
+        let startup = receive(&session.server).await;
+        assert_eq!(&startup[..8], &[7, 0, 40, 0, 11, 1, 15, 39]);
+        assert!(!session.task.is_finished());
+        // Pause only after actual socket traffic has completed; auto-advancing
+        // virtual time while waiting for OS I/O can exhaust handshake retries.
+        tokio::time::pause();
+        tokio::time::advance(Duration::from_secs(5)).await;
+        assert_eq!(
+            timeout(Duration::from_secs(1), session.task)
+                .await
+                .unwrap()
+                .unwrap(),
+            State::Stop
+        );
+        assert!(!*ready.borrow());
+        assert_eq!(
+            session.control.borrow().state,
+            State::Success,
+            "UDP never rewrites EAP authorization"
+        );
+    }
+
+    #[tokio::test]
+    async fn counters_wrap_after_full_byte_range() {
+        let server = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let client = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        client.connect(server.local_addr().unwrap()).await.unwrap();
+        let settings = Settings::default();
+        let (_tx, rx) = watch::channel(ChannelData {
+            state: State::Stop,
+            data: Vec::new(),
+        });
+        let mut process = Process::new(
+            &settings,
+            Arc::new(Socket::new(client)),
+            rx,
+            MacAddr::zero(),
+            "127.0.0.1".parse().unwrap(),
+            "127.0.0.1:53".parse().unwrap(),
+        );
+        process.data.counter = 255;
+        process.data.flux = vec![0; 4];
+        let first = process.misc_heartbeat_1();
+        let third = process.misc_heartbeat_3();
+        assert_eq!(first[1], 0);
+        assert_eq!(third[1], 1);
+    }
 }

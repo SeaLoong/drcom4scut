@@ -1,0 +1,86 @@
+#!/bin/sh /etc/rc.common
+# procd supervises one foreground client; passwords are never command arguments.
+USE_PROCD=1
+START=95
+STOP=10
+
+resolve_network_device() {
+	# Authentication can be required before DHCP. l3_device may not exist yet.
+	network_get_physdev interface "$network" || network_get_device interface "$network"
+}
+
+private_config_path() {
+	case "$1" in
+		/etc/drcom4scut/*) ;;
+		*) return 1 ;;
+	esac
+	local name="${1#/etc/drcom4scut/}"
+	case "$name" in
+		''|.|..|*[!A-Za-z0-9._-]*) return 1 ;;
+	esac
+}
+
+validate_private_config() {
+	# LuCI may edit these path options but must never turn them into arbitrary
+	# root-file reads or a hook-bearing config under a writable temporary directory.
+	private_config_path "$config" && private_config_path "$password_file" || return 1
+	[ -d /etc/drcom4scut ] && [ ! -L /etc/drcom4scut ] || return 1
+	[ "$(stat -c '%u:%a' /etc/drcom4scut 2>/dev/null)" = 0:700 ] || return 1
+	[ -f "$config" ] && [ ! -L "$config" ] || return 1
+	case "$(stat -c '%u:%a' "$config" 2>/dev/null)" in
+		0:400|0:600) ;;
+		*) return 1 ;;
+	esac
+}
+
+prepare_status_directory() {
+	[ ! -L /var/run/drcom4scut ] || return 1
+	mkdir -p /var/run/drcom4scut || return 1
+	chown root:root /var/run/drcom4scut || return 1
+	chmod 700 /var/run/drcom4scut
+}
+
+start_service() {
+	local enabled config interface network password_file metadata
+	config_load drcom4scut
+	config_get_bool enabled main enabled 0
+	[ "$enabled" = 1 ] || return 0
+	config_get config main config /etc/drcom4scut/config.yml
+	config_get network main network wan
+	config_get interface main interface
+	config_get password_file main password_file /etc/drcom4scut/password
+	validate_private_config || { logger -t drcom4scut 'Config paths must be private root-owned files directly under /etc/drcom4scut'; return 1; }
+	[ -r "$config" ] || { logger -t drcom4scut 'Configuration file is missing'; return 1; }
+	[ -f "$password_file" ] && [ ! -L "$password_file" ] || {
+		logger -t drcom4scut 'Password must be a regular private file'; return 1;
+	}
+	metadata="$(stat -c '%u:%a' "$password_file" 2>/dev/null)"
+	case "$metadata" in
+		0:400|0:600) ;;
+		*) logger -t drcom4scut 'Password file must be owned by root with mode 0400 or 0600'; return 1 ;;
+	esac
+	if [ -z "$interface" ]; then
+		. /lib/functions/network.sh
+		resolve_network_device || {
+			logger -t drcom4scut 'Network device is not ready; waiting for a netifd event'; return 0;
+		}
+	fi
+	[ -n "$interface" ] || { logger -t drcom4scut 'No Ethernet interface selected'; return 1; }
+	prepare_status_directory || { logger -t drcom4scut 'Cannot create private status directory'; return 1; }
+	procd_open_instance
+	procd_set_param command /usr/bin/drcom4scut --config "$config" --password-file "$password_file" --interface "$interface" --status-file /var/run/drcom4scut/status.json
+	procd_set_param respawn 3600 5 5
+	procd_set_param file "$config" "$password_file"
+	procd_set_param stdout 1
+	procd_set_param stderr 1
+	procd_close_instance
+}
+
+service_triggers() {
+	local network
+	config_load drcom4scut
+	config_get network main network wan
+	procd_add_reload_trigger drcom4scut
+	# Reopen the selected interface and refresh DHCP addresses after netifd changes.
+	procd_add_interface_trigger 'interface.*' "$network" /etc/init.d/drcom4scut restart
+}

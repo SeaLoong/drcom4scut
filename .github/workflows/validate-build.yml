@@ -1,0 +1,104 @@
+name: Validate and build
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: "1"
+
+jobs:
+  quality:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      matrix: ${{ steps.platforms.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          components: rustfmt, clippy
+      - run: cargo +stable fmt --all -- --check
+      - run: cargo +stable clippy --locked --all-targets --all-features -- -D warnings
+      - run: cargo +stable clippy --locked --all-targets --no-default-features -- -D warnings
+      - name: Test package ABI validation and private OpenWrt service arguments
+        run: python3 -m unittest discover -s .github/scripts/tests -v
+      - name: Test LuCI ACL, safe RPC metadata and view fixtures
+        run: python3 -m unittest discover -s packaging/openwrt/luci-app-drcom4scut/tests -v
+      - name: Read the shared release platform manifest
+        id: platforms
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, pathlib
+          platforms = json.loads(pathlib.Path('.github/scripts/platforms.json').read_text())
+          matrix = []
+          for platform in platforms:
+              target = platform['target']
+              runner = 'qemu-arm' if target.startswith(('armv5te-', 'armv7-')) else ('qemu-riscv64' if target.startswith('riscv64gc-') else '')
+              os = 'windows-latest' if platform['format'] == 'pe' else ('ubuntu-24.04-arm' if target.startswith('aarch64-') else 'ubuntu-24.04')
+              matrix.append({'os': os, 'target': target, 'runner': runner, 'static': platform['openwrt'], 'features': ','.join(platform.get('features', []))})
+          print('matrix=' + json.dumps({'include': matrix}))
+          PY
+
+  build:
+    needs: quality
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.quality.outputs.matrix) }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Use the Rust distribution's self-contained static musl linker
+        if: matrix.static
+        run: echo 'RUSTFLAGS=-C linker=rust-lld -C target-feature=+crt-static' >> "$GITHUB_ENV"
+      - name: Install user-mode emulator for cross-target tests
+        if: matrix.runner != ''
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y qemu-user
+          # Foreign-CPU suites run serially; each protocol test still drives concurrent async tasks.
+          echo 'RUST_TEST_THREADS=1' >> "$GITHUB_ENV"
+          echo "DRCOM_TEST_RUNNER=${{ matrix.runner }}" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_$(echo '${{ matrix.target }}' | tr '[:lower:]-' '[:upper:]_')_RUNNER=${{ matrix.runner }}" >> "$GITHUB_ENV"
+      - name: Install Windows packet capture SDK
+        if: runner.os == 'Windows'
+        uses: ./.github/actions/setup-npcap
+      - name: Test Windows service ACL policy without administrator rights
+        if: runner.os == 'Windows'
+        run: powershell -NoProfile -NonInteractive -File scripts/test-service-acl.ps1
+      - name: Test default features, including mock EAP/UDP and CLI integration
+        if: matrix.features == ''
+        run: cargo +stable test --locked --target ${{ matrix.target }}
+      - name: Test static router feature set
+        if: matrix.features != ''
+        run: cargo +stable test --locked --target ${{ matrix.target }} --no-default-features --features '${{ matrix.features }}'
+      - name: Test minimal features
+        run: cargo +stable test --locked --target ${{ matrix.target }} --no-default-features
+      - name: Build release
+        if: matrix.features == ''
+        run: cargo +stable build --locked --release --target ${{ matrix.target }}
+      - name: Build static router release
+        if: matrix.features != ''
+        run: cargo +stable build --locked --release --target ${{ matrix.target }} --no-default-features --features '${{ matrix.features }}'
+      - name: Build minimal feature executable
+        run: cargo +stable build --locked --target ${{ matrix.target }} --no-default-features
+      - name: Validate target ABI and package tested executable
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          EMULATOR: ${{ matrix.runner }}
+        run: python .github/scripts/package_release.py "$TARGET" --runner "$EMULATOR"
+      - name: Upload package
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: package-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14

@@ -1,0 +1,120 @@
+#!/bin/sh
+# rpcd executable-plugin protocol; the request contains no accepted arguments.
+# No method accepts commands, paths, usernames, passwords or log filters.
+case "$1" in
+	list)
+		printf '%s\n' '{"status":{},"logs":{},"diagnostics":{},"start":{},"stop":{},"restart":{}}'
+		exit 0
+		;;
+	call)
+		case "$2" in status|logs|diagnostics|start|stop|restart) ;; *) exit 3 ;; esac
+		;;
+	*) exit 1 ;;
+esac
+
+. /usr/share/libubox/jshn.sh
+. /usr/libexec/drcom4scut-luci-sanitize.sh
+readonly SERVICE=/etc/init.d/drcom4scut
+readonly STATUS_FILE=/var/run/drcom4scut/status.json
+readonly STATUS_DIRECTORY=/var/run/drcom4scut
+
+is_running() {
+	"$SERVICE" running >/dev/null 2>&1
+}
+
+read_status() {
+	available=0
+	version=unknown
+	phase=unavailable
+	interface=''
+	updated=''
+	eap=0
+	online=0
+	# The file and containing directory are created privately by procd/core.
+	# Reject symlink leaves and foreign/writable metadata rather than following it.
+	[ -d "$STATUS_DIRECTORY" ] && [ ! -L "$STATUS_DIRECTORY" ] || return 0
+	[ "$(stat -c '%u:%a' "$STATUS_DIRECTORY" 2>/dev/null)" = '0:700' ] || return 0
+	[ -f "$STATUS_FILE" ] && [ ! -L "$STATUS_FILE" ] || return 0
+	case "$(stat -c '%u:%a' "$STATUS_FILE" 2>/dev/null)" in 0:400|0:600) ;; *) return 0 ;; esac
+	[ "$(wc -c < "$STATUS_FILE")" -le 8192 ] || return 0
+	json_load "$(head -c 8192 "$STATUS_FILE")" >/dev/null 2>&1 || return 0
+	local schema raw_version raw_phase raw_interface raw_updated raw_eap raw_online
+	json_get_var schema schema
+	[ "$schema" = 1 ] || return 0
+	json_get_var raw_version version
+	json_get_var raw_phase phase
+	json_get_var raw_interface interface
+	json_get_var raw_updated updated_at
+	json_get_var raw_eap eap_authenticated
+	json_get_var raw_online online
+	version="$(drcom_version "$raw_version")"
+	phase="$(drcom_phase "$raw_phase")"
+	interface="$(drcom_interface "$raw_interface")"
+	updated="$(drcom_updated "$raw_updated")"
+	case "$raw_eap" in 1|true) eap=1 ;; esac
+	case "$raw_online" in 1|true) online=1 ;; esac
+	available=1
+}
+
+emit_status() {
+	local diagnostic="$1" running=0
+	read_status
+	if is_running; then running=1; else phase=offline; eap=0; online=0; fi
+	json_init
+	json_add_int schema 1
+	json_add_boolean available "$available"
+	json_add_boolean running "$running"
+	json_add_string version "$version"
+	json_add_string phase "$phase"
+	json_add_boolean eap_authenticated "$eap"
+	json_add_boolean online "$online"
+	json_add_string updated_at "$updated"
+	if [ "$diagnostic" = 0 ]; then json_add_string interface "$interface"; fi
+	# Deliberately omit PID, account, IP, MAC, arbitrary messages and configuration.
+	if [ "$diagnostic" = 1 ]; then
+		json_add_string privacy 'Only allowlisted service metadata and event categories are exported.'
+		json_add_boolean credentials_included 0
+		json_add_array events
+		append_events
+		json_close_array
+	fi
+	json_dump
+}
+
+append_events() {
+	# The stream is never returned verbatim. Every event is one of a closed set.
+	# A here-document avoids losing jshn's JSON state in a pipeline subshell.
+	local lines line count=0
+	lines="$(/sbin/logread -e drcom4scut 2>/dev/null | tail -n 60)"
+	while IFS= read -r line; do
+		[ -n "$line" ] || continue
+		count=$((count + 1))
+		json_add_object ''
+		json_add_int sequence "$count"
+		json_add_string event "$(drcom_event "$line")"
+		json_add_string level "$(drcom_level "$line")"
+		json_close_object
+	done <<END_EVENTS
+$lines
+END_EVENTS
+}
+
+case "$2" in
+	status) emit_status 0 ;;
+	diagnostics) emit_status 1 ;;
+	logs)
+		json_init
+		json_add_array events
+		append_events
+		json_close_array
+		json_dump
+		;;
+	start|stop|restart)
+		# Exact allowlist above; no request-supplied argument reaches an executable.
+		result=0
+		"$SERVICE" "$2" >/dev/null 2>&1 || result=$?
+		json_init
+		json_add_boolean success "$([ "$result" = 0 ] && printf 1 || printf 0)"
+		json_dump
+		;;
+esac

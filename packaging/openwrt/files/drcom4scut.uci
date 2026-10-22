@@ -1,0 +1,8 @@
+config client 'main'
+	option enabled '0'
+	option network 'wan'
+	# Leave interface empty to use netifd's device for network above.
+	option interface ''
+	option config '/etc/drcom4scut/config.yml'
+	# This file contains the password only, mode 0600, owned by root.
+	option password_file '/etc/drcom4scut/password'

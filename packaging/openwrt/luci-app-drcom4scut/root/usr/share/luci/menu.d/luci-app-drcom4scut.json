@@ -1,0 +1,8 @@
+{
+  "admin/services/drcom4scut": {
+    "title": "SCUT DrCOM",
+    "order": 70,
+    "action": { "type": "view", "path": "drcom4scut" },
+    "depends": { "acl": ["luci-app-drcom4scut"], "uci": { "drcom4scut": true } }
+  }
+}

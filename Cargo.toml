@@ -1,29 +1,38 @@
 [package]
 name = "drcom4scut"
-version = "0.3.2"
-rust-version = "1.92"
+version = "0.4.0"
+rust-version = "1.99"
 authors = ["SeaLoong <sealoongw@foxmail.com>"]
 edition = "2024"
 description = "A 3rd-party Drcom client for SCUT."
-license = "GPL-3.0-or-later"
+license = "LGPL-3.0-or-later"
 readme = "README.md"
 
 [dependencies]
-bytes = "1.11.0"
-chrono = "0.4.43"
-clap = { version = "4.5", features = ["cargo"] }
-crossbeam-channel = "0.5.15"
-encoding_rs = "0.8.35"
+socket2 = { version = "0.6.5", features = ["all"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+bytes = "1.12.1"
+chrono = "0.4.45"
+clap = { version = "4.6.7", features = ["cargo"] }
+encoding_rs = "0.8.42"
 hex = "0.4.3"
 hostname = "0.4.2"
-log = "0.4.29"
-md-5 = "0.10.6"
-pnet = "0.35"
-rand = "0.9.2"
-trust-dns-resolver = "0.23.2"
+log = "0.4.34"
+md-5 = "0.11.0"
+pnet = "0.35.0"
+rand = "0.10.3"
+hickory-resolver = { version = "0.26.3", default-features = false, features = ["tokio"] }
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "net", "sync", "time", "macros", "signal", "process", "io-util"] }
+
+[dependencies.reqwest]
+version = "0.13.5"
+default-features = false
+features = ["query", "json", "form"]
+optional = true
 
 [dependencies.config]
-version = "0.15.19"
+version = "0.15.27"
 default-features = false
 features = ["yaml"]
 
@@ -32,6 +41,9 @@ version = "1.4.0"
 features = ["gzip"]
 optional = true
 
+[dev-dependencies]
+tokio = { version = "1.54.1", features = ["test-util"] }
+
 [profile.release]
 opt-level = 3
 lto = true
@@ -39,4 +51,12 @@ panic = 'abort'
 strip = true
 
 [features]
-default = ["log4rs"]
+default = ["log4rs", "portal-tls"]
+portal = ["dep:reqwest"]
+portal-tls = ["portal", "reqwest/rustls"]
+
+[target.'cfg(windows)'.dependencies]
+pcap = "2.5.0"
+windows-sys = { version = "0.61.2", features = ["Win32_Networking_WinSock", "Win32_System_SystemInformation", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis", "Win32_System_LibraryLoader"] }
+
+windows-service = "0.8.1"

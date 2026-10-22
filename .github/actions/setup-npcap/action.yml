@@ -1,0 +1,25 @@
+name: Install Npcap SDK
+description: Download the version-pinned official SDK using normal TLS verification.
+runs:
+  using: composite
+  steps:
+    - name: Download and select x64 import library
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $sdkRoot = Join-Path $env:RUNNER_TEMP 'npcap-sdk-1.15'
+        $archive = Join-Path $env:RUNNER_TEMP 'npcap-sdk-1.15.zip'
+        Invoke-WebRequest -Uri 'https://npcap.com/dist/npcap-sdk-1.15.zip' -OutFile $archive
+        Expand-Archive -LiteralPath $archive -DestinationPath $sdkRoot -Force
+        foreach ($name in @('Packet.lib', 'wpcap.lib')) {
+          $library = Join-Path $sdkRoot "Lib/x64/$name"
+          if (!(Test-Path -LiteralPath $library -PathType Leaf)) {
+            throw "Official Npcap SDK is missing Lib/x64/$name"
+          }
+          Copy-Item -LiteralPath $library -Destination (Join-Path $env:GITHUB_WORKSPACE $name)
+        }
+        "LIB=$sdkRoot/Lib/x64;$env:LIB" >> $env:GITHUB_ENV
+        "LIBPCAP_LIBDIR=$sdkRoot/Lib/x64" >> $env:GITHUB_ENV
+        # Mock/CLI tests do not capture packets. Delay loading lets them run without
+        # installing a capture driver on the runner; real capture still needs Npcap.
+        'RUSTFLAGS=-C link-arg=/DELAYLOAD:Packet.dll -C link-arg=/DELAYLOAD:wpcap.dll -C link-arg=delayimp.lib' >> $env:GITHUB_ENV

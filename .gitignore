@@ -10,3 +10,11 @@ config.yml
 #project
 Packet.lib
 .vscode
+
+wpcap.lib
+
+/dist
+
+# Local Python test caches
+__pycache__/
+*.py[cod]

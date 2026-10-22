@@ -1,3 +1,31 @@
+# drcom4scut 0.4.0: legacy values are preserved unless an option is set.
+mode: eap
+interface:
+profile: legacy
+# Keep the password out of this file when possible. Relative paths use this directory.
+password_file:
+no_udp: false
+no_log: false
+once: false
+local_port: 36144
+server_port: 61440
+eap_ip:
+udp_ip:
+gateway:
+dns2:
+status_file:
+reconnect_max: 300
+hooks:
+  online: []
+  offline: []
+  timeout: 10
+portal:
+  base_url: https://s.scut.edu.cn
+  api_url:
+  ac_ip:
+  client_ip:
+  # Only enable deliberately when your campus portal requires cleartext HTTP.
+  allow_http: false
 mac:
 ip:
 username:

@@ -1,11 +1,11 @@
-use crate::Settings;
+use crate::settings::Settings;
 
-#[allow(unused_variables)]
-pub fn init(settings: &Settings) {
+pub fn init(settings: &Settings) -> Result<(), String> {
     #[cfg(not(feature = "log4rs"))]
-    simple_logger::init();
+    simple_logger::init(settings.debug)?;
     #[cfg(feature = "log4rs")]
-    init_log4rs(settings);
+    init_log4rs(settings)?;
+    Ok(())
 }
 
 #[cfg(not(feature = "log4rs"))]
@@ -14,10 +14,16 @@ mod simple_logger {
 
     static LOGGER: SimpleLogger = SimpleLogger;
 
-    pub fn init() {
+    pub fn init(debug: bool) -> Result<(), String> {
         log::set_logger(&LOGGER)
-            .map(|()| log::set_max_level(LevelFilter::Trace))
-            .expect("Failed to init logger!");
+            .map(|()| {
+                log::set_max_level(if debug {
+                    LevelFilter::Debug
+                } else {
+                    LevelFilter::Info
+                })
+            })
+            .map_err(|_| "Failed to initialize logger".to_owned())
     }
 
     struct SimpleLogger;
@@ -47,11 +53,10 @@ mod simple_logger {
 }
 
 #[cfg(feature = "log4rs")]
-fn init_log4rs(settings: &Settings) {
+fn init_log4rs(settings: &Settings) -> Result<(), String> {
     if log::LevelFilter::Off == settings.log.level_filter {
-        return;
+        return Ok(());
     }
-    use crate::settings::DEBUG;
     use log4rs::{
         append::{
             console::ConsoleAppender,
@@ -66,7 +71,7 @@ fn init_log4rs(settings: &Settings) {
         config::{Appender, Config, Root},
         encode::pattern::PatternEncoder,
     };
-    let stdout = if *DEBUG || settings.log.enable_console {
+    let stdout = if settings.debug || settings.log.enable_console {
         Some(
             ConsoleAppender::builder()
                 .encoder(Box::new(PatternEncoder::new(
@@ -92,18 +97,18 @@ fn init_log4rs(settings: &Settings) {
                             FixedWindowRoller::builder()
                                 .base(1)
                                 .build(&(directory.clone() + "/log-{}.gz"), 10)
-                                .expect("Can't build FixedWindowRoller!"),
+                                .map_err(|_| "Cannot configure log rotation".to_owned())?,
                         ),
                     )),
                 )
-                .expect("Can't build RollingFileAppender!"),
+                .map_err(|_| "Cannot open log file".to_owned())?,
         )
     } else {
         None
     };
 
     if stdout.is_none() && logfile.is_none() {
-        return;
+        return Ok(());
     }
 
     let mut config = Config::builder();
@@ -119,18 +124,8 @@ fn init_log4rs(settings: &Settings) {
 
     let config = config
         .build(root.build(settings.log.level_filter))
-        .expect("Can't build log config!");
+        .map_err(|_| "Cannot build log configuration".to_owned())?;
 
-    log4rs::init_config(config).expect("Can't init log config!");
-}
-
-#[test]
-fn test() {
-    use log::{debug, error, info, trace, warn};
-    init(&Settings::default());
-    trace!("trace test");
-    debug!("debug test");
-    info!("info test");
-    warn!("warn test");
-    error!("error test");
+    log4rs::init_config(config).map_err(|_| "Cannot initialize log configuration".to_owned())?;
+    Ok(())
 }

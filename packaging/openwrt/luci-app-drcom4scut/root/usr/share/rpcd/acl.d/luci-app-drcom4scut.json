@@ -1,0 +1,13 @@
+{
+  "luci-app-drcom4scut": {
+    "description": "View safe DrCOM status and administer its dedicated service",
+    "read": {
+      "ubus": { "drcom4scut": ["status", "logs", "diagnostics"] },
+      "uci": ["drcom4scut"]
+    },
+    "write": {
+      "ubus": { "drcom4scut": ["start", "stop", "restart"] },
+      "uci": ["drcom4scut"]
+    }
+  }
+}

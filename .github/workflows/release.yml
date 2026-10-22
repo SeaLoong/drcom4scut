@@ -1,0 +1,83 @@
+name: Manual release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag, matching Cargo.toml (for example v0.4.0)
+        required: true
+        type: string
+      draft:
+        description: Create a draft release for review
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Verify version and existing tag target
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          python - <<'PY'
+          import os, pathlib, re, subprocess, tomllib
+          tag = os.environ['RELEASE_TAG']
+          version = tomllib.loads(pathlib.Path('Cargo.toml').read_text())['package']['version']
+          if not re.fullmatch(r'v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?', tag) or tag != f'v{version}':
+              raise SystemExit(f'Release tag must match Cargo.toml: v{version}')
+          existing = subprocess.run(['git', 'rev-parse', '--verify', f'refs/tags/{tag}^{{commit}}'], capture_output=True, text=True)
+          if existing.returncode == 0 and existing.stdout.strip() != os.environ['GITHUB_SHA']:
+              raise SystemExit('Existing release tag points at another commit')
+          PY
+
+  validate:
+    needs: version
+    uses: ./.github/workflows/validate-build.yml
+
+  release:
+    needs: [version, validate]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: package-*
+          path: dist
+          merge-multiple: true
+      - name: Verify the complete shared platform matrix and checksums
+        run: python3 .github/scripts/verify_release.py
+      - name: Create release from the validated commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          CREATE_DRAFT: ${{ inputs.draft }}
+        run: |
+          git fetch --tags --force origin
+          if git show-ref --quiet --verify "refs/tags/$RELEASE_TAG"; then
+            if [[ "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" != "$GITHUB_SHA" ]]; then
+              echo 'Release tag changed during validation and points at another commit' >&2
+              exit 1
+            fi
+          else
+            git tag -- "$RELEASE_TAG" "$GITHUB_SHA"
+          fi
+          # A non-forced push rejects a tag created at another commit during builds.
+          git push origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+          args=("$RELEASE_TAG" --verify-tag --title "$RELEASE_TAG" --generate-notes)
+          if [[ "$CREATE_DRAFT" == true ]]; then args+=(--draft); fi
+          gh release create "${args[@]}" dist/*.tar.gz dist/*.zip dist/SHA256SUMS
