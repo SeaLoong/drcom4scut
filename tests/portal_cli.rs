@@ -98,6 +98,10 @@ impl PortalMock {
                         requests.clone(),
                     );
                     handlers.push(std::thread::spawn(move || {
+                        // Winsock accept inherits the listener's nonblocking
+                        // mode. This handler uses blocking reads with a timeout;
+                        // otherwise early WouldBlock closes a valid connection.
+                        stream.set_nonblocking(false).unwrap();
                         stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
                         let mut request = Vec::new();
                         while !request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
