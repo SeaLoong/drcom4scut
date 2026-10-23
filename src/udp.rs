@@ -294,7 +294,12 @@ impl<'a> Process<'a> {
                         }
                         (_, HeaderType::MessageServerInformation) if raw.len() >= 4 => {
                             let (message, _) = encoding_rs::GB18030.decode_without_bom_handling(&raw[4..]);
-                            info!("Server information: {message}");
+                            let display = crate::util::server_message(
+                                &message,
+                                &self.settings.username,
+                                &self.settings.password,
+                            );
+                            info!("Server information: {display}");
                             None
                         }
                         _ => { debug!("Ignoring malformed or out-of-order UDP datagram."); None }

@@ -130,7 +130,7 @@ SDK 按其发行版生成 `.ipk` 或 `.apk`。该包只包含 JS、Shell、JSON 
 
 修改代码后，GitHub 会自动检查格式、代码问题、测试及各平台构建。打包步骤还会确认“文件名说给哪种电脑使用，里面就确实是哪种程序”，并生成供下载者核对的校验值。
 
-[Rust CI](https://github.com/SeaLoong/drcom4scut/blob/master/.github/workflows/rust.yml) 在 push、pull request 或手动运行时调用[共用验证工作流](https://github.com/SeaLoong/drcom4scut/blob/master/.github/workflows/validate-build.yml)。它运行格式、两组严格 Clippy、默认/精简及目标特性测试、平台构建和脚本回归。清单包含六个桌面目标和五个静态路由器目标，共十一个；runner、模拟器和 Npcap 库架构在同一清单中明确声明。
+[Rust CI](https://github.com/SeaLoong/drcom4scut/blob/master/.github/workflows/rust.yml) 在推送到 `master`、提交 PR 或手动运行时调用[共用验证工作流](https://github.com/SeaLoong/drcom4scut/blob/master/.github/workflows/validate-build.yml)；仅修改 `site/` 或 Pages 工作流的推送与 PR 由网站流程检查，随软件打包的 `docs/` 修改仍执行 Rust CI。它运行格式、两组严格 Clippy、默认/精简及目标特性测试、平台构建和脚本回归。清单包含六个桌面目标和五个静态路由器目标，共十一个；runner、模拟器和 Npcap 库架构在同一清单中明确声明。
 
 平台清单同时驱动构建矩阵、[打包器](https://github.com/SeaLoong/drcom4scut/blob/master/.github/scripts/package_release.py)和[发布完整性检查](https://github.com/SeaLoong/drcom4scut/blob/master/.github/scripts/verify_release.py)。Cargo 命令显式指定 target，打包前核对 ELF/PE/Mach-O、CPU、位宽、端序、静态属性、ARM 基线/ABI 和实际版本。包内包含程序、配置示例、文档、许可证及相应 OpenWrt 资源，并生成 SHA-256。`BUILD-INFO.json` 记录源码版本、提交、工作区状态和目标平台，汇总发布时再次核对。
 

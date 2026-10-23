@@ -317,8 +317,12 @@ impl<'a, T: Transport> Process<'a, T> {
                     let Ok(message) = std::str::from_utf8(payload) else {
                         return Ok(None);
                     };
-                    // Keep server messages out of credential-bearing debug dumps.
-                    error!("EAP server notification: {message}");
+                    let display = crate::util::server_message(
+                        message,
+                        &self.settings.username,
+                        &self.settings.password,
+                    );
+                    error!("EAP server notification: {display}");
                     return Ok(Some(notification_state(message)));
                 }
                 None => (),
@@ -708,7 +712,12 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn notification_propagates_scheduled_sleep() {
-        let settings = settings();
+        // The code is also a synthetic password: logging masks it, while the
+        // protocol must continue to interpret the original server notification.
+        let settings = Settings {
+            password: "16".into(),
+            ..settings()
+        };
         let (link, server, mut outgoing) = link();
         let (tx, state) = watch();
         let mut process = process(&settings, link, tx);
