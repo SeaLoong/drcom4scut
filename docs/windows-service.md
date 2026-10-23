@@ -1,12 +1,16 @@
 # Windows 后台服务部署
 
-后台服务适合在用户未登录、未打开 GUI 时持续认证。普通桌面使用可选择 [Windows GUI](https://github.com/SeaLoong/drcom4scutGUI)；只有需要系统级自动运行时才部署服务。
+[返回首页](../README.md) · [普通桌面用户使用图形界面](https://github.com/SeaLoong/drcom4scutGUI)
 
-服务使用固定名称 `drcom4scut`，以 LocalSystem 身份自动启动。有线模式需要 Npcap；Portal 模式不需要抓包驱动，但系统须已连接对应网络。先在控制台确认自己的配置可以认证，再进行后台部署。不要同时运行 GUI 认证和服务。
+如果只想登录电脑后自动联网，使用 GUI 的“登录系统时启动”和“打开 GUI 后自动认证”即可。**本页面向管理员**，适合需要在任何人登录 Windows 之前就开始认证的电脑。
+
+后台服务由 Windows 管理，不需要一直开着认证窗口。它使用固定名称 `drcom4scut`，以 Windows 自带的高权限系统账号（LocalSystem）运行，因此程序和密码文件都必须保护好，不能放在其他普通用户能随意替换的目录。
+
+先在终端中确认账号配置能正常认证，再安装服务。有线认证需要安装 [Npcap](https://npcap.com/#download)，它让程序能读写有线认证所需的网卡报文。无线网页登录不需要该驱动，但系统仍须先连上对应 Wi-Fi；兼容范围见[无线指南](portal.md)。不要同时用 GUI 和服务在同一网卡认证。
 
 ## 准备配置
 
-使用默认发布版核心，在私有位置准备 `config.yml` 和单独的 `password` 文件，例如：
+从[下载页](https://github.com/SeaLoong/drcom4scut/releases)选择适合本机处理器的 Windows 核心包。在只有当前用户可访问的目录中准备 `config.yml` 和单独的 `password` 文件，例如：
 
 ```yaml
 username: '你的校园网账号'
@@ -14,13 +18,17 @@ password_file: password
 interface: '填入 --list-interfaces 显示的实际名称'
 ```
 
-密码文件仅含一行不带 BOM 的 UTF-8 密码。Portal 模式改用[对应配置](portal.md)。GUI 的 DPAPI 密文只供原 Windows 用户解密，不可直接当作 LocalSystem 服务的密码文件。
+密码文件只写一行校园网密码，保存为 UTF-8 纯文本；编辑器若区分“带 BOM”和“无 BOM”，选择“无 BOM”，避免额外文件头。使用网页登录时改用[对应配置](portal.md)。GUI 保存的密码受原 Windows 用户保护（DPAPI），服务使用的是另一个系统账号，不能直接拿 GUI 的加密内容当作密码文件。
 
-程序、配置、密码及其父目录均需具备受保护的所有者与 ACL。服务安装会拒绝网络路径、重解析点、普通用户可替换的程序/配置以及普通用户可读取的密码。安装命令不会自动复制文件或替你修正权限。
+Windows 的文件访问规则称为 ACL，决定谁能读取和修改文件。服务会检查程序、配置、密码以及上级文件夹的所有者和访问规则：普通用户不能替换服务程序，也不能读取服务密码。网络共享路径和会跳转到其他位置的文件或文件夹（重解析点）也不会接受。
+
+安装服务的命令只登记路径，不会帮你复制文件或修改权限。下一节提供完整准备步骤，不要通过给“所有人”访问权限来绕过检查。
 
 ## 创建受保护目录
 
-以下示例在**管理员 Windows PowerShell 5.1** 中执行。当前目录应包含核对过 SHA-256 的 `drcom4scut.exe`，以及自己的 `config.yml`、`password`。示例仅创建全新目录，已有安装按下文维护；不会输出文件内容。
+在开始菜单找到 **Windows PowerShell**，右键选择“以管理员身份运行”。以下脚本适用于 Windows PowerShell 5.1：先进入刚准备好的文件夹，其中应包含已核对下载指纹（SHA-256）的 `drcom4scut.exe`，以及自己的 `config.yml` 和 `password`。
+
+脚本会创建 `%ProgramData%\drcom4scut`，只允许管理员和系统账号访问，并把这三个文件复制进去。它不会显示密码内容。为避免覆盖已有安装，目标目录已存在时会停止；已有安装请按后面的维护步骤操作。完整保留权限设置，不要只挑复制文件的几行执行。
 
 ```powershell
 $ErrorActionPreference = 'Stop'
@@ -61,11 +69,11 @@ foreach ($name in @('drcom4scut.exe', 'config.yml', 'password')) {
 }
 ```
 
-密码保留在受保护的部署目录中；来源文件、备份和编辑器临时文件也应妥善保护。若配置引用其他密码文件，它及全部父目录同样必须通过检查；仅保护 YAML 不够。
+完成后，服务使用受保护目录里的密码文件。原文件、备份和编辑器留下的临时副本也可能包含密码，应同样妥善保存。若配置改为引用另一个密码文件，该文件及其上级文件夹也必须满足相同要求；只保护 `config.yml` 还不够。
 
 ## 安装与日常管理
 
-继续在管理员 PowerShell 中运行：
+仍在管理员 PowerShell 中，先检查配置，再安装、启动并查看服务：
 
 ```powershell
 $core = Join-Path $env:ProgramData 'drcom4scut\drcom4scut.exe'
@@ -76,20 +84,20 @@ $config = Join-Path $env:ProgramData 'drcom4scut\config.yml'
 & $core --service-status
 ```
 
-安装只登记受保护程序和配置的路径，不立即认证，也不覆盖已有同名服务。服务不接受交互式密码输入或明文密码参数；使用 YAML 中的 `password_file`，并优先采用相对于配置目录或绝对的私有路径。
+第一条只检查文件内容；`--service-install` 登记后台服务，`--service-start` 才开始运行，最后一条查看运行情况。已有同名服务不会被覆盖。服务运行时没有窗口供你输入密码，必须从配置中的 `password_file` 读取；不要把密码放在启动参数里。
 
-`--service-status` 显示 Running、StartPending 或 Stopped 等进程状态。查看认证是否在线，应读取配置目录下的 `status.json`；服务日志位于同目录的 `logs`，不使用 System32 作为日志目录：
+`--service-status` 中的 `Running` 表示程序正在运行，`StartPending` 表示正在启动，`Stopped` 表示已停止。**Running 不代表学校认证成功**，还需要查看配置目录中的连接状态：
 
 ```powershell
 $status = Join-Path $env:ProgramData 'drcom4scut\status.json'
 & $core status --status-file $status
 ```
 
-服务级故障由 Windows 在约 30 秒后重启，普通认证重试由客户端处理。停止时会尝试有时间上限的注销和清理。
+连接状态保存在同目录的 `status.json`，日志在 `logs` 文件夹中，不会写进 Windows 的 System32。认证失败时客户端会按配置重试；服务本身意外退出时，Windows 约 30 秒后重新启动它。正常停止会先尝试向学校注销，再退出。
 
 ## 修改、升级与卸载
 
-修改配置或替换程序前先停止服务，等待状态为 Stopped；保留受保护目录及文件的所有者和 ACL，备份后再由管理员更新。重新检查配置与认证状态后启动。
+修改账号、配置或替换程序前，先停止服务并确认显示 `Stopped`，再由管理员备份和更新文件。保持原目录与文件的所有者和访问规则；更新后重新检查配置，再启动：
 
 ```powershell
 & $core --service-stop
@@ -103,4 +111,12 @@ $status = Join-Path $env:ProgramData 'drcom4scut\status.json'
 & $core --service-uninstall
 ```
 
-卸载只移除服务登记，程序、配置、状态和日志仍保留。启动被拒绝时，检查实际选中的配置/密码文件及祖先目录权限、驱动和网卡 IPv4；不要通过放宽密码访问权限绕过检查。普通 Running 状态、CI 或模拟认证不能替代目标 Windows 机器的实际联网确认。
+卸载只取消 Windows 中的服务登记，不会删除程序、配置、密码和日志。确认不再需要后，再由管理员处理这些文件。
+
+| 现象 | 下一步 |
+| --- | --- |
+| 安装或启动被拒绝 | 看错误指出的路径，检查文件及上级目录是否仍由管理员和系统账号保护 |
+| 服务在运行，但认证失败 | 查看 `status.json` 和 `logs`，确认账号、网卡名称、地址和认证模式 |
+| 有线自检提示无法抓包 | 检查 Npcap 是否安装，以及实际网卡是否已取得 IPv4 地址 |
+
+分享日志前移除账号、密码和私人网络信息。自动测试和服务状态不能代替这台电脑在校园网中的实际联网检查。

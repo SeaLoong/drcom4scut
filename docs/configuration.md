@@ -1,50 +1,83 @@
 # 配置参考
 
-首次使用可运行 `drcom4scut init --config config.yml` 生成完整模板，发布包也附带 `config.example.yml`。日常使用通常只需填写 `username`、`password_file`，并在多网卡环境设置 `interface`。命令行中的取值参数优先于对应 YAML 字段；下面的文件路径和字段名区分大小写。
+[返回首页](../README.md)
+
+如果你使用图形界面，先在界面中填写账号和密码即可，不必阅读本页。这里主要供命令行用户查找配置项；第一次使用请先完成[快速开始](../README.md#命令行使用)。
+
+`config.yml` 是一份纯文本设置文件。运行 `./drcom4scut init --config config.yml` 可以生成模板，发布包中也有 `config.example.yml`。字段名保留英文，冒号后的内容才是要填写的值；不要改字段名或缩进。临时在命令行指定的设置优先于文件里的同一项。
 
 ## 基础配置
+
+通常只需修改账号、密码文件和连接校园网的网卡名称：
 
 ```yaml
 mode: eap
 username: '你的校园网账号'
 password_file: password
 interface: eth0
-no_udp: false
 ```
 
-`mode: eap` 使用有线认证；`mode: portal` 使用[无线门户](portal.md)。`no_udp: true` 将有线认证设为仅 EAP；临时添加 `--with-udp` 可覆盖该设置。Portal 模式不使用有线 UDP 心跳参数。
+`eth0` 是例子，请替换为 `./drcom4scut --list-interfaces` 中实际连接校园网网线的名称。多个网卡时，明确选择可以避免认证到错误网络。
 
-| 字段 | 默认值 | 用途 |
+| 想设置什么 | 字段 | 通常怎样填写 |
 | --- | --- | --- |
-| `interface` | 自动选择 | 有线网卡名称，取自 `--list-interfaces` |
-| `ip` | 所选网卡的 IPv4 | 固定真实本地 IPv4；须为本机地址 |
-| `mac` | 所选网卡的 MAC | 有线网卡选择；Portal 中用于核对在线会话归属 |
-| `host` | `s.scut.edu.cn` | UDP 服务器域名或 IPv4，不填写 URL |
-| `dns` | 模板中的四个校园 DNS | IPv4 DNS 列表，可写 `IP` 或 `IP:端口` |
-| `hostname` | 当前机器名 | 有线认证中发送的主机名 |
-| `no_log` | `false` | 关闭文件日志，保留控制台输出设置 |
-| `once` | `false` | 测试一次认证流程并退出，不持续保活 |
-| `status_file` | 不写文件 | 连接状态 JSON 的路径 |
+| 有线还是无线网页登录 | `mode` | 网线用默认 `eap`；无线网页登录见[独立指南](portal.md)，使用 `portal` |
+| 校园网账号 | `username` | 按学校要求填写完整账号，包括需要的运营商后缀 |
+| 密码放在哪里 | `password_file` | 例如 `password`，见下文；不要同时填写另一个非空 `password` |
+| 使用哪张有线网卡 | `interface` | 从 `--list-interfaces` 的 `NAME` 一列复制 |
+| 是否只完成有线第一阶段 | `no_udp` | 通常保持 `false`，只有确认网络不需要后续认证才设为 `true` |
+| 是否只运行一次 | `once` | 默认 `false`；`true` 只测试一次认证，不持续保持连接 |
+| 是否记录当前连接结果 | `status_file` | 例如 `status.json`；未填写就不生成状态文件 |
+| 是否关闭文件日志 | `no_log` | 默认 `false`；设为 `true` 后不写日志文件 |
 
-未固定 `ip` 时，客户端会重新检查网卡地址并在变化后重建会话。指定 `interface` 和 `ip` 时，地址必须已分配给该网卡；指定 `mac` 和 `ip` 时，两项也必须匹配同一网卡。桥接、虚拟网卡等出现重复 MAC 时，仅按 MAC 选择会拒绝歧义，应补充接口名或真实 IPv4。固定地址适用于由用户维护网络配置的场景；修改 `eap_ip`、`udp_ip` 不会替操作系统设置本地地址。
+有线默认流程先完成身份认证，再与学校服务器建立并保持后续会话。文档和日志中分别称为 EAP、UDP；普通用户不必单独调整它们。`no_udp: true` 只执行前一阶段，不能用来掩盖后一阶段的错误。临时参数 `--with-udp` 可覆盖文件中的这一项。
+
+### 网络地址一般留给程序选择
+
+下面这些字段通常不需要改：
+
+| 字段 | 默认行为或值 | 需要注意什么 |
+| --- | --- | --- |
+| `ip` | 使用所选网卡已经取得的 IPv4 地址 | 填写时必须是本机已有地址，不能任意编造 |
+| `mac` | 使用所选网卡的硬件地址 | 有线时辅助选择网卡；无线网页登录时辅助核对设备 |
+| `host` | `s.scut.edu.cn` | 有线后续认证服务器，填写域名或 IPv4，不是网页登录 URL |
+| `dns` | 模板中的四个校园 DNS | 用于把服务器域名查成地址；每项可写 `IP` 或 `IP:端口` |
+| `hostname` | 当前电脑名称 | 在有线认证时发送给学校的机器名 |
+
+未固定 `ip` 时，程序会在网卡地址变化后重新建立会话。如果同时填写网卡、硬件地址和 IP，它们必须属于同一张网卡。几张网卡使用相同硬件地址时，单靠 `mac` 选不准，需补充网卡名称或 IP。
+
+这些选项只是告诉客户端使用哪个现有地址，不会替操作系统分配地址、设置 DHCP 或修改路由。
 
 ## 密码与路径
 
-推荐使用单独的密码文件，只保存一行不带 BOM 的 UTF-8 密码，可有一个结尾换行。Linux、macOS 下必须为普通文件、单链接，且组和其他用户无读写执行权限（通常设为 `0600` 或 `0400`）。Windows 普通运行应使用当前用户私有目录；[Windows 服务](windows-service.md)与 [OpenWrt 服务](openwrt.md)另有严格的所有者和 ACL/权限要求。macOS 的密码文件权限与 [BPF 抓包权限](macos.md#有线抓包权限)分别配置。
+推荐把密码单独放在纯文本文件中：只写一行，选择 UTF-8 编码；编辑器若区分“带 BOM”和“无 BOM”，选择“无 BOM”，避免额外添加文件头。结尾有一次换行可以接受。文件名要与 `password_file` 一致，Windows 编辑器不要无意中多加 `.txt`。
 
-密码来源按以下优先级选用：`--password-stdin`、`--password-file PATH`、旧版 `--password` 参数、YAML `password_file`、YAML `password`。前三种命令行密码选项不能同时使用；配置中不要同时填写非空的 `password` 和 `password_file`。旧版明文参数仅用于兼容，日常操作使用文件，GUI 使用私有标准输入管道。
+Mac / Linux 执行 `chmod 600 password`，让其他用户不能读取密码。密码必须是普通文件，不能是链接或管道；同一个文件也不能通过另一个硬链接暴露。只读的 `0400` 权限也可用。Windows 将文件放在当前用户的私有目录；后台服务和路由器还要满足各自指南中的管理员权限要求。
 
-| 路径 | 相对路径的基准 |
+不要把密码放进命令行或环境变量。图形界面会通过私有输入通道传给核心；其“记住密码”使用系统密码保护，不等于这里的纯文本文件。
+
+相对路径就是没有写完整目录的文件名，例如 `password`。它从哪里开始找，取决于填写位置：
+
+| 填写位置 | 从哪里开始查找 |
 | --- | --- |
-| `--config` | 当前工作目录，默认 `config.yml` |
-| YAML `password_file` | 配置文件所在目录 |
-| `--password-file` | 当前工作目录 |
-| `status_file` / `--status-file` | 当前工作目录 |
-| `log.file_directory` | 当前工作目录 |
+| `--config config.yml` | 当前终端所在目录，未指定时默认找 `config.yml` |
+| 配置中的 `password_file: password` | `config.yml` 所在目录 |
+| 命令行 `--password-file password` | 当前终端所在目录 |
+| `status_file` / `--status-file` | 当前终端所在目录 |
+| `log.file_directory` | 当前终端所在目录 |
 
-后台部署优先使用绝对路径，并确保状态文件的父目录已存在且可写。`status` 子命令需要显式提供 `--status-file`，不会自动读取 YAML 中的该字段。
+后台部署建议写完整的绝对路径，并先建立可写的状态文件目录。查看状态时须显式指定路径，例如 `./drcom4scut status --status-file status.json`；该命令不会自动从配置中寻找状态文件。旧状态文件可能残留，应同时检查 `updated_at`（最后更新时间）是否还在变化。
+
+<details>
+<summary>开发集成或兼容旧配置时的密码来源顺序</summary>
+
+按以下顺序选用：`--password-stdin`、`--password-file PATH`、旧版 `--password` 参数、YAML `password_file`、YAML `password`。前三种命令行密码选项互斥；配置中不能同时有非空的 `password` 和 `password_file`。旧版明文参数只为兼容保留，不推荐日常使用。Windows 后台服务还要求服务专用的受保护密码文件，不接受交互式标准输入。
+
+</details>
 
 ## 重连、心跳与日志
+
+“心跳”是客户端定期与学校服务器联系、保持认证有效的请求。一般使用模板默认值即可；只有排障或学校要求不同时再改：
 
 ```yaml
 time: '07:00'
@@ -63,26 +96,45 @@ log:
   level: INFO
 ```
 
-`time` 是收到时段限制后的本地重连时间，格式为 `HH:MM`。`reconnect` 与 `reconnect_max` 是重连退避的起始值和上限，单位为秒，上限须不小于起始值。`heartbeat` 的时间值为秒；`retry.interval` 为毫秒，`retry.count` 为重试次数。时间值需为正数，重试次数可为 0。一般无需调整校园网默认心跳。
+| 设置 | 怎么理解 |
+| --- | --- |
+| `time` | 学校提示时段限制后，按本机时间在何时再次尝试；格式 `HH:MM` |
+| `reconnect` / `reconnect_max` | 重连的起始等待和最大等待，单位秒；连续失败时等待逐渐增加 |
+| `heartbeat.*` | 等待学校心跳回复的时间，单位秒 |
+| `retry.count` / `retry.interval` | 重试次数和每次间隔；间隔单位毫秒，`5000` 即 5 秒 |
+| `log.enable_console` / `enable_file` | 是否在终端显示、是否写入文件 |
+| `log.file_directory` | 日志保存目录 |
+| `log.level` | 默认 `INFO` 适合日常使用；需要更多细节时可用 `DEBUG` |
 
-日志等级为 `OFF`、`ERROR`、`WARN`、`INFO`、`DEBUG` 或 `TRACE`。默认写入 `latest.log`，约 1 MiB 后滚动，保留最多 10 个压缩历史文件。`logs` 显示当前日志最后 200 行。`--no-log` 关闭文件日志；精简构建只提供控制台日志，构建差异见[开发文档](development.md#构建特性)。
+时间值须大于 0，最大重连等待不能小于起始等待；重试次数可以为 0。日志等级完整取值为 `OFF`、`ERROR`、`WARN`、`INFO`、`DEBUG`、`TRACE`。
+
+默认日志名为 `latest.log`，约 1 MiB 后存成历史文件，最多保留 10 份压缩历史。`./drcom4scut logs --config config.yml` 显示当前日志最后 200 行；`--no-log` 关闭文件日志。少数精简构建没有文件日志，差异见[构建特性](development.md#构建特性)。分享日志前仍需遮住个人信息。
 
 ## 有线报文兼容选项
 
-`profile` 默认为 `legacy`，一般保持默认。`windows31` 是另一种服务端报文兼容配置，名称不表示只能在 Windows 使用，也不会根据操作系统自动选择。只有存在明确的校园部署或报文兼容依据时才切换；它不能修复网卡、地址或抓包权限错误。
+**普通用户保持默认即可，不按操作系统选择。** `profile` 是“程序按哪种格式与学校认证服务器说话”的兼容开关，默认 `legacy`。`windows31` 的名字来自另一种客户端报文格式，不表示 Windows 用户应该改用它；Mac、Linux 也不需要为系统类型改这里。
+
+只有已经确认当前网络需要另一格式时才切换。它不能修复选错网卡、没有 IP 地址或缺少权限的问题。
+
+<details>
+<summary>网络维护者需要的字段与报文差异</summary>
 
 | 配置 | 含义 |
 | --- | --- |
 | `profile: legacy` | 原客户端的 `0x2a` 标志和 244 字节 MiscInfo；别名 `legacy-2a` |
 | `profile: windows31` | `0x31` 标志、260 字节 MiscInfo，以及额外 UDP 启动心跳确认；别名 `windows-31` |
-| `eap_ip` | EAP 报文中携带的 IPv4，默认使用真实本地地址 |
-| `udp_ip` | UDP 报文中携带的 IPv4，默认使用真实本地地址 |
+| `eap_ip` | EAP 报文中携带的 IPv4，默认使用实际本地地址 |
+| `udp_ip` | UDP 报文中携带的 IPv4，默认使用实际本地地址 |
 | `local_port` / `server_port` | UDP 本地/服务器端口，默认 `36144` / `61440` |
 | `gateway` / `dns2` | 可选的 Windows31 网关/第二 DNS 报文字段 |
 
-`ip` 决定真实传输源地址；`eap_ip` / `udp_ip` 只影响报文内容。不要把文档或抓包示例地址直接作为本机网络配置。`windows31` 在未填写 `dns2` 时使用 DNS 列表中的第二项。显式 `data.*` 覆盖值优先于 profile 默认值；这些字段用于已有协议分析结论的部署，普通用户应保留模板中的空值。字段和握手依据见[协议参考记录](references-clients.md)。
+`ip` 影响实际发送请求的本地地址；`eap_ip`、`udp_ip` 只改请求里的字段。`windows31` 未指定 `dns2` 时使用 DNS 列表第二项。显式 `data.*` 覆盖值优先于 profile 默认值；没有协议分析依据时保留模板空值。详细差异与固定来源见[协议参考](references-clients.md)。
+
+</details>
 
 ## 上线与离线命令
+
+这是给有自动化需要的用户准备的功能：连接成功或离线时，额外运行一个自己信任的本地程序。默认关闭，普通用户可以跳过。
 
 ```yaml
 hooks:
@@ -91,11 +143,13 @@ hooks:
   timeout: 10
 ```
 
-`online`、`offline` 均为“可执行程序及参数”的字符串数组，空数组表示关闭。程序直接执行数组，不自动启动 shell 或展开通配符。命令收到 `DRCOM_STATE`、`DRCOM_INTERFACE`、`DRCOM_IP` 三个连接信息变量；客户端不向它提供账号密码。`timeout` 的单位为秒。仅配置自己信任的本地程序，并使用绝对路径，避免后台运行时找错命令。
+`online` 和 `offline` 分别填写“可执行程序及参数”的字符串数组。程序会直接执行，不自动启动 shell、展开通配符或解释命令拼接符。使用绝对路径，可避免后台运行时找错程序。`timeout` 是最长等待秒数。
 
-普通上线/下线转换使用 `hooks.timeout`；程序退出时的下线清理最多使用 `min(hooks.timeout, 1)` 秒。命令应快速、可重复执行且不会因重复下线而破坏状态：上线命令中途取消后，客户端仍会尝试执行配对的下线命令，以清理可能已经产生的副作用。
+被调用程序只收到 `DRCOM_STATE`、`DRCOM_INTERFACE`、`DRCOM_IP` 三个连接信息变量，不会得到账号密码。退出时离线命令最多等待 `min(hooks.timeout, 1)` 秒。命令应可重复运行；即使上线命令中途被取消，客户端仍会尝试执行配对的离线命令，清理可能产生的影响。
 
 ## 检查与覆盖
+
+先检查文件填写，再临时覆盖选项：
 
 ```sh
 ./drcom4scut --config config.yml --check-config
@@ -103,4 +157,28 @@ hooks:
 ./drcom4scut --config config.yml --dns 202.38.193.33 --dns 222.201.130.30
 ```
 
-配置检查会读取当前选中的密码来源，但不会打开网卡或进行认证。模板里尚未填写账号、密码时检查失败属于预期。全部命令参数可通过 `--help` 查看；[Portal 字段](portal.md#配置)和平台服务路径要求见各部署指南。
+后两条分别举例临时指定网卡、只运行第一阶段，以及指定备用域名查询服务器；请先确认自己的网络确实需要它们。配置检查会读取所选密码文件，但不访问网卡或发送认证请求。模板尚未填账号密码时，检查失败是正常的。
+
+其他参数可看 `./drcom4scut --help`。无线网页登录的字段见[无线指南](portal.md#配置)，后台服务的文件要求见 [Windows](windows-service.md) / [OpenWrt](openwrt.md)。
+
+## 检查下载的文件
+
+下载页面会附带 `SHA256SUMS`，其中每行是一份文件名和对应的 SHA-256 校验值。校验是为了确认下载完整且与该次发布一致，不需要了解其算法。
+
+在终端中对下载的包计算校验值：
+
+```sh
+# Mac
+shasum -a 256 '下载的包文件名.tar.gz'
+
+# Linux
+sha256sum '下载的包文件名.tar.gz'
+```
+
+Windows PowerShell 使用：
+
+```powershell
+Get-FileHash -Algorithm SHA256 -LiteralPath '下载的包文件名.zip'
+```
+
+把引号里的占位文件名换成实际文件名；输出的校验值应与同一条发布记录的 `SHA256SUMS` 中该文件对应的一行完全一致。如果不一致，先停止使用并重新下载、核对发布来源。
