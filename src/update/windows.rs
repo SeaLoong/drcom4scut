@@ -89,7 +89,7 @@ impl FileSecurity {
         }
     }
 
-    fn apply(&self, path: &Path) -> Result<(), UpdateError> {
+    fn write(&self, path: &Path) -> Result<(), UpdateError> {
         let file = fs::OpenOptions::new()
             .access_mode(READ_CONTROL | WRITE_DAC)
             .open(path)?;
@@ -116,6 +116,11 @@ impl FileSecurity {
                 "cannot preserve executable Windows access rules; original executable was retained",
             ));
         }
+        Ok(())
+    }
+
+    fn apply(&self, path: &Path) -> Result<(), UpdateError> {
+        self.write(path)?;
         let staged = Self::read(path)?;
         if staged.protected != self.protected || staged.rules() != self.rules() {
             return Err(invalid(
@@ -135,12 +140,8 @@ mod tests {
     use super::*;
     use windows_sys::Win32::Security::Authorization::ConvertStringSecurityDescriptorToSecurityDescriptorW;
 
-    fn custom_rules(path: &Path) {
-        // Protect the ACL and add an explicit world-read rule so this differs
-        // from the staging directory's default inherited access rules.
-        let sddl: Vec<_> = "D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;OW)(A;;GR;;;WD)\0"
-            .encode_utf16()
-            .collect();
+    fn descriptor(sddl: &str) -> FileSecurity {
+        let sddl: Vec<_> = sddl.encode_utf16().chain(Some(0)).collect();
         let mut descriptor = ptr::null_mut();
         // SAFETY: valid NUL-terminated SDDL and output descriptor pointer.
         assert_ne!(
@@ -169,12 +170,36 @@ mod tests {
             },
             0
         );
-        let rules = FileSecurity {
+        FileSecurity {
             descriptor,
             dacl,
             protected: true,
-        };
-        rules.apply(path).unwrap();
+        }
+    }
+
+    fn custom_rules(path: &Path) {
+        // Use file-specific FR, as on an existing file. Windows expands generic
+        // GR during SetSecurityInfo, so raw SDDL with GR is not a file snapshot.
+        descriptor("D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;OW)(A;;FR;;;WD)")
+            .apply(path)
+            .unwrap();
+    }
+
+    #[test]
+    fn generic_file_rights_are_mapped_by_windows() {
+        let directory = tempfile::tempdir().unwrap();
+        let target = directory.path().join("generic.exe");
+        fs::write(&target, b"original").unwrap();
+        let generic = descriptor("D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;OW)(A;;GR;;;WD)");
+        let file_specific = descriptor("D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;OW)(A;;FR;;;WD)");
+        generic.write(&target).unwrap();
+        let actual = FileSecurity::read(&target).unwrap();
+        assert_ne!(actual.rules(), generic.rules());
+        assert_eq!(actual.rules(), file_specific.rules());
+        assert!(actual.protected);
+        // Production copying starts from the OS snapshot and still requires
+        // an exact ACL/protection match, rather than accepting normalization.
+        actual.apply(&target).unwrap();
     }
 
     #[test]
