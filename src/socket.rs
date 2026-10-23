@@ -291,9 +291,12 @@ impl Socket {
 
     pub async fn receive(&self) -> io::Result<Vec<u8>> {
         // Oversized datagrams cannot become a valid truncated protocol packet.
-        let mut buffer = [0u8; 65536];
+        // Keep the maximum-size buffer on the heap: embedding it in every
+        // nested protocol future can overflow a runtime/test thread's stack.
+        let mut buffer = vec![0u8; 65536];
         let size = self.socket.recv(&mut buffer).await?;
-        Ok(buffer[..size].to_vec())
+        buffer.truncate(size);
+        Ok(buffer)
     }
 }
 

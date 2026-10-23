@@ -22,6 +22,10 @@ PLATFORMS = {p["target"]: p for p in json.loads((ROOT / ".github/scripts/platfor
 def verify_abi(binary, platform):
     """Reject mislabeled host binaries before they can become release assets."""
     data = pathlib.Path(binary).read_bytes()
+    verify_abi_bytes(data, platform)
+
+
+def verify_abi_bytes(data, platform):
     if platform["format"] == "elf":
         if len(data) < 52 or data[:4] != b"\x7fELF" or data[5] != 1:
             raise ValueError("Expected a little-endian ELF executable")
@@ -81,6 +85,17 @@ def verify_abi(binary, platform):
         raise ValueError("Unsupported executable format")
 
 
+def source_revision(root):
+    commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
+    expected = os.environ.get("GITHUB_SHA")
+    if not re.fullmatch(r"[0-9a-f]{40}", commit) or (expected and expected != commit):
+        raise ValueError("Source checkout does not match the build commit")
+    dirty = bool(subprocess.check_output(
+        ["git", "status", "--porcelain", "--untracked-files=normal"], cwd=root, text=True
+    ).strip())
+    return commit, dirty
+
+
 def package(root, target, runner=(), target_dir=None):
     platform = PLATFORMS[target]
     version = tomllib.loads((root / "Cargo.toml").read_text())["package"]["version"]
@@ -101,12 +116,17 @@ def package(root, target, runner=(), target_dir=None):
     reported = subprocess.check_output([*runner, str(binary), "--version"], text=True).strip()
     if reported != f"drcom4scut {version}":
         raise ValueError(f"Unexpected built version: {reported!r}")
+    commit, dirty = source_revision(root)
     dist = root / "dist"
     dist.mkdir(exist_ok=True)
     stem = f"drcom4scut-{version}-{target}"
     with tempfile.TemporaryDirectory() as temp:
         contents = pathlib.Path(temp) / stem
         contents.mkdir()
+        (contents / "BUILD-INFO.json").write_text(json.dumps({
+            "version": version, "target": target, "source_commit": commit,
+            "source_dirty": dirty, "openwrt": platform["openwrt"],
+        }, indent=2) + "\n", encoding="utf-8")
         for source, name in (
             (binary, binary_name), (root / "README.md", "README.md"),
             (root / "LICENSE", "LICENSE"),

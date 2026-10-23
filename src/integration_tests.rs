@@ -170,3 +170,151 @@ async fn e2e_eap_authorization_controls_udp_handshake_heartbeat_and_disconnect()
             .is_err()
     );
 }
+
+#[tokio::test]
+async fn e2e_expired_udp_session_is_refreshed_while_eap_stays_authenticated() {
+    async fn receive_from(socket: &UdpSocket) -> (Vec<u8>, std::net::SocketAddr) {
+        let mut bytes = [0; 2048];
+        let (size, peer) = timeout(Duration::from_secs(3), socket.recv_from(&mut bytes))
+            .await
+            .expect("UDP transcript stalled")
+            .unwrap();
+        (bytes[..size].to_vec(), peer)
+    }
+
+    async fn heartbeat(socket: &UdpSocket, peer: std::net::SocketAddr) {
+        socket.send_to(&[7, 0, 0, 0, 6], peer).await.unwrap();
+        let (first, sender) = receive_from(socket).await;
+        assert_eq!(sender, peer);
+        assert_eq!(&first[..8], &[7, 1, 40, 0, 11, 1, 220, 2]);
+        let mut second = vec![0; 40];
+        second[..6].copy_from_slice(&[7, 1, 40, 0, 11, 2]);
+        second[16..20].copy_from_slice(&[5, 6, 7, 8]);
+        socket.send_to(&second, peer).await.unwrap();
+        let (third, sender) = receive_from(socket).await;
+        assert_eq!(sender, peer);
+        assert_eq!(&third[..6], &[7, 2, 40, 0, 11, 3]);
+        second[5] = 4;
+        socket.send_to(&second, peer).await.unwrap();
+    }
+
+    async fn handshake(socket: &UdpSocket, token: u8) -> std::net::SocketAddr {
+        let (alive, peer) = receive_from(socket).await;
+        assert_eq!(alive, [7, 0, 8, 0, 1, 0, 0, 0]);
+        socket
+            .send_to(&[7, 0, 0, 0, 2, 0, 0, 0, 1, 2, 3, 4], peer)
+            .await
+            .unwrap();
+        let (info, sender) = receive_from(socket).await;
+        assert_eq!(sender, peer);
+        assert_eq!(info.len(), 244);
+        let mut info_response = vec![0; 32];
+        info_response[0] = 7;
+        info_response[4] = 4;
+        info_response[16..32].fill(token);
+        socket.send_to(&info_response, peer).await.unwrap();
+        let (alive, sender) = receive_from(socket).await;
+        assert_eq!(sender, peer);
+        assert_eq!(alive.len(), 38);
+        assert_eq!(alive[0], 0xff);
+        for index in 0..16 {
+            assert_eq!(alive[20 + index], token.rotate_left((index % 8) as u32));
+        }
+        // Every new UDP session starts at counter one and receives a new token.
+        heartbeat(socket, peer).await;
+        peer
+    }
+
+    let server = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+    let mut settings = Settings {
+        username: "student".into(),
+        password: "fake-password".into(),
+        host: "127.0.0.1".into(),
+        dns: vec!["127.0.0.1:53".parse().unwrap()],
+        local_port: 0,
+        server_port: server.local_addr().unwrap().port(),
+        reconnect: 1,
+        reconnect_max: 1,
+        ..Settings::default()
+    };
+    settings.retry.count = 0;
+    settings.retry.interval = 5000;
+    settings.heartbeat.udp_timeout = 1;
+    settings.heartbeat.eap_timeout = 300;
+    let (to_client, incoming) = mpsc::channel(16);
+    let (outgoing, mut from_client) = mpsc::channel(16);
+    let link = Arc::new(EthernetLink {
+        incoming: Mutex::new(incoming),
+        outgoing,
+    });
+    let (auth, state) = watch::channel(ChannelData::stopped());
+    let (ready_tx, mut ready) = watch::channel(false);
+    let mut eap =
+        eap::Process::with_transport(&settings, link, CLIENT, "127.0.0.1".parse().unwrap(), auth);
+    let udp = crate::client::udp_supervisor(
+        &settings,
+        state.clone(),
+        ready_tx,
+        CLIENT,
+        "127.0.0.1".parse().unwrap(),
+    );
+    let server_exchange = async {
+        assert_eq!(from_client.recv().await.unwrap()[15], 2);
+        assert_eq!(from_client.recv().await.unwrap()[15], 1);
+        to_client.send(frame(1, 1, &[1])).await.unwrap();
+        assert_eq!(from_client.recv().await.unwrap()[22], 1);
+        let mut challenge = vec![4, 16];
+        challenge.extend([0x33; 16]);
+        to_client.send(frame(1, 2, &challenge)).await.unwrap();
+        assert_eq!(from_client.recv().await.unwrap()[22], 4);
+        to_client.send(frame(3, 2, &[])).await.unwrap();
+
+        let peer = handshake(&server, 0x21).await;
+        timeout(Duration::from_secs(2), ready.wait_for(|online| *online))
+            .await
+            .unwrap()
+            .unwrap();
+        let original_checksum = state.borrow().data.clone();
+        for cycle in 0..3 {
+            let (alive, sender) = receive_from(&server).await;
+            assert_eq!(sender, peer);
+            assert_eq!(alive[0], 0xff, "short outages keep the current session");
+            // Keep the Ethernet session active throughout UDP loss.
+            to_client.send(frame(1, 10 + cycle, &[1])).await.unwrap();
+            let reply = from_client.recv().await.unwrap();
+            assert_eq!(&reply[18..20], &[2, 10 + cycle]);
+            assert_eq!(reply[22], 1);
+            assert_eq!(state.borrow().state, State::Success);
+            assert_eq!(state.borrow().data, original_checksum);
+            // Real socket traffic finishes before advancing the missing reply's
+            // deadline. This keeps the test reliable under QEMU and busy runners.
+            tokio::time::pause();
+            tokio::time::advance(Duration::from_secs(5)).await;
+            tokio::time::resume();
+        }
+        let _new_peer = handshake(&server, 0x42).await;
+        timeout(Duration::from_secs(2), ready.wait_for(|online| *online))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(state.borrow().state, State::Success);
+        assert_eq!(state.borrow().data, original_checksum);
+        assert!(
+            from_client.try_recv().is_err(),
+            "UDP recovery sends no EAP Logoff/Start"
+        );
+        to_client.send(frame(4, 2, &[])).await.unwrap();
+    };
+    let (eap_state, ()) = timeout(Duration::from_secs(60), async {
+        tokio::join!(eap.start(), async {
+            tokio::select! {
+                _ = udp => panic!("UDP supervisor exited before recovery"),
+                () = server_exchange => (),
+            }
+        })
+    })
+    .await
+    .expect("session refresh transcript must finish");
+    assert_eq!(eap_state, State::Stop);
+    assert!(!*ready.borrow(), "dropping the supervisor clears readiness");
+}

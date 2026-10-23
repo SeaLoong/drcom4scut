@@ -1,0 +1,36 @@
+:root {
+  --vp-c-brand-1: #087f8c;
+  --vp-c-brand-2: #0697a4;
+  --vp-c-brand-3: #077f8a;
+  --vp-c-brand-soft: rgba(8, 127, 140, .12);
+  --vp-home-hero-name-color: transparent;
+  --vp-home-hero-name-background: linear-gradient(120deg, #087f8c 15%, #1753a5 80%);
+  --vp-home-hero-image-background-image: linear-gradient(145deg, #73e4d6 0%, #83b4fa 100%);
+  --vp-home-hero-image-filter: blur(72px);
+  --vp-font-family-base: 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif;
+}
+.dark { --vp-c-brand-1: #52cfc9; --vp-c-brand-2: #75dbd6; --vp-c-brand-3: #087f8c; --vp-home-hero-name-background: linear-gradient(120deg, #6be1d6 15%, #88b9ff 80%); }
+.VPHero .tagline { max-width: 560px; line-height: 1.65; }
+.VPHero .image-src { max-height: 290px; }
+.VPFeature { border: 1px solid var(--vp-c-divider); background: var(--vp-c-bg-soft); }
+.VPFeature .title { font-size: 18px; }
+.VPFeature .details { line-height: 1.85; }
+.home-body { max-width: 1152px; margin: 52px auto 64px; padding: 0 24px; }
+.home-body h2 { font-size: 29px; line-height: 1.4; margin: 0 0 10px; font-weight: 700; letter-spacing: -.02em; }
+.home-lead { color: var(--vp-c-text-2); line-height: 1.8; margin-bottom: 28px; }
+.steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; margin: 30px 0 48px; }
+.step-number { display: inline-grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; background: var(--vp-c-brand-soft); color: var(--vp-c-brand-1); font-size: 17px; font-weight: 700; }
+.steps h3 { font-size: 18px; margin: 14px 0 8px; font-weight: 600; }
+.steps p, .help-panel p { color: var(--vp-c-text-2); line-height: 1.85; }
+.help-panel { border: 1px solid var(--vp-c-divider); border-radius: 18px; padding: 28px 32px; background: var(--vp-c-bg-soft); display: flex; justify-content: space-between; gap: 26px; align-items: center; }
+.help-panel h3 { font-size: 21px; font-weight: 650; margin-bottom: 8px; }
+.help-panel a { white-space: nowrap; font-weight: 600; color: var(--vp-c-brand-1); text-decoration: underline; text-underline-offset: 4px; }
+.vp-doc p { line-height: 1.9; }
+.vp-doc td { line-height: 1.75; }
+@media (max-width: 639px) {
+  .home-body { margin-top: 36px; }
+  .home-body h2 { font-size: 25px; }
+  .steps { grid-template-columns: 1fr; gap: 24px; }
+  .help-panel { padding: 24px; align-items: flex-start; flex-direction: column; }
+  .VPHero .image-src { max-height: 210px; }
+}

@@ -303,6 +303,44 @@ fn once_portal_cli_confirms_the_mock_session_without_exposing_stdin_password() {
     assert_eq!(directory.status()["eap_authenticated"], false);
 }
 
+#[cfg(feature = "log4rs")]
+#[test]
+fn debug_option_enables_diagnostics_and_respects_explicit_logging_off() {
+    for (level, debug, diagnostics) in [
+        ("INFO", false, false),
+        ("INFO", true, true),
+        ("TRACE", false, true),
+        ("TRACE", true, true),
+        ("OFF", true, false),
+    ] {
+        let directory = Directory::new();
+        std::fs::write(
+            directory.0.join("config.yml"),
+            format!("username: test-student\nhostname: test-pc\nlog: {{enable_console: true, enable_file: false, level: {level}}}\n"),
+        )
+        .unwrap();
+        let server = PortalMock::new(false);
+        let mut command = server.command(&directory);
+        command.args(["--password-stdin", "--once"]);
+        if debug {
+            command.arg("--debug");
+        }
+        let output = Process::start(command, Some(PASSWORD)).finish();
+        assert_private_success(&output);
+        let text = output_text(&output);
+        assert_eq!(
+            text.contains("Checking this device's portal session."),
+            diagnostics,
+            "level={level}, debug={debug}: {text}"
+        );
+        if level == "OFF" {
+            assert!(text.is_empty(), "{text}");
+        }
+        assert_eq!(server.logins.load(Ordering::SeqCst), 1);
+        assert_eq!(directory.status()["online"], true);
+    }
+}
+
 #[test]
 fn known_foreign_portal_account_is_not_reported_as_our_login_or_logged_out() {
     let directory = Directory::new();

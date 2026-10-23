@@ -1,6 +1,8 @@
 import importlib.util
 import hashlib
 import json
+import io
+import zipfile
 from pathlib import Path
 import struct
 import tempfile
@@ -12,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[3]
 spec = importlib.util.spec_from_file_location("package_release", ROOT / ".github/scripts/package_release.py")
 package_release = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(package_release)
+source_revision = package_release.source_revision
 spec = importlib.util.spec_from_file_location("verify_release", ROOT / ".github/scripts/verify_release.py")
 verify_release = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(verify_release)
@@ -41,6 +44,56 @@ def macho(machine=16777223, filetype=2):
 
 
 class PackagingTests(unittest.TestCase):
+    def setUp(self):
+        source_patch = patch.object(package_release, "source_revision", return_value=("a" * 40, False))
+        source_patch.start()
+        self.addCleanup(source_patch.stop)
+
+    def test_source_metadata_rejects_wrong_checkout_and_records_local_changes(self):
+        with patch.dict(package_release.os.environ, {"GITHUB_SHA": "a" * 40}):
+            with patch.object(package_release.subprocess, "check_output", side_effect=["b" * 40]):
+                with self.assertRaisesRegex(ValueError, "build commit"):
+                    source_revision(ROOT)
+            for status, dirty in (("", False), (" M src/main.rs\n", True), ("?? untracked.rs\n", True)):
+                with self.subTest(status=status), patch.object(
+                    package_release.subprocess, "check_output", side_effect=["a" * 40, status]
+                ):
+                    self.assertEqual(source_revision(ROOT), ("a" * 40, dirty))
+
+    def write_archive(self, archive, platform, *, commit="a" * 40, dirty=False, wrong_cpu=False):
+        prefix = f'drcom4scut-0.4.1-{platform["target"]}/'
+        name = "drcom4scut.exe" if platform["format"] == "pe" else "drcom4scut"
+        if platform["format"] == "elf":
+            data = elf(62 if wrong_cpu else platform["machine"], platform["bits"])
+        elif platform["format"] == "macho":
+            data = macho(platform["machine"])
+        else:
+            data = bytearray(128)
+            data[:2] = b"MZ"
+            struct.pack_into("<I", data, 60, 64)
+            data[64:68] = b"PE\0\0"
+            struct.pack_into("<H", data, 68, platform["machine"])
+        entries = {
+            prefix + name: data,
+            prefix + "BUILD-INFO.json": json.dumps({
+                "version": "0.4.1", "target": platform["target"], "source_commit": commit,
+                "source_dirty": dirty, "openwrt": platform["openwrt"],
+            }).encode(),
+        }
+        if archive.suffix == ".zip":
+            with zipfile.ZipFile(archive, "w") as output:
+                for name, data in entries.items():
+                    output.writestr(name, data)
+        else:
+            with tarfile.open(archive, "w:gz") as output:
+                for name, data in entries.items():
+                    member = tarfile.TarInfo(name)
+                    member.size = len(data)
+                    output.addfile(member, io.BytesIO(data))
+        digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+        archive.with_suffix(archive.suffix + ".sha256").write_text(f"{digest}  {archive.name}\n")
+        return digest
+
     def check_elf(self, target, data):
         with tempfile.TemporaryDirectory() as directory:
             binary = Path(directory) / "binary"
@@ -204,26 +257,38 @@ class PackagingTests(unittest.TestCase):
             for platform in json.loads(manifest.read_text()):
                 suffix = ".zip" if platform["format"] == "pe" else ".tar.gz"
                 archive = dist / f'drcom4scut-0.4.1-{platform["target"]}{suffix}'
-                archive.write_bytes(platform["target"].encode())
-                digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+                digest = self.write_archive(archive, platform)
                 expected[archive.name] = digest
                 archive.with_suffix(archive.suffix + ".sha256").write_text(f"{digest}  {archive.name}\n")
             missing = dist / "drcom4scut-0.4.1-aarch64-apple-darwin.tar.gz"
             contents = missing.read_bytes()
             missing.unlink()
             with self.assertRaisesRegex(SystemExit, "Missing regular"):
-                verify_release.verify(root)
+                verify_release.verify(root, source_commit="a" * 40)
             self.assertFalse((dist / "SHA256SUMS").exists())
             missing.write_bytes(contents)
-            verify_release.verify(root)
+            verify_release.verify(root, source_commit="a" * 40)
             actual = {name: digest for digest, name in (
                 line.split("  ", 1) for line in (dist / "SHA256SUMS").read_text().splitlines()
             )}
             self.assertEqual(actual, expected)
             self.assertEqual(len(actual), 11)
+            affected = json.loads(manifest.read_text())[2]
+            invalid = dist / f'drcom4scut-0.4.1-{affected["target"]}.tar.gz'
+            original = invalid.read_bytes()
+            original_sum = invalid.with_suffix(".gz.sha256").read_bytes()
+            for changes, message in (({"commit": "b" * 40}, "validated source"),
+                                     ({"dirty": True}, "modified source"),
+                                     ({"wrong_cpu": True}, "architecture")):
+                with self.subTest(changes=changes):
+                    self.write_archive(invalid, affected, **changes)
+                    with self.assertRaisesRegex(SystemExit, message):
+                        verify_release.verify(root, source_commit="a" * 40)
+            invalid.write_bytes(original)
+            invalid.with_suffix(".gz.sha256").write_bytes(original_sum)
             missing.write_bytes(b"changed after validation")
             with self.assertRaisesRegex(SystemExit, "Checksum"):
-                verify_release.verify(root)
+                verify_release.verify(root, source_commit="a" * 40)
 
     def test_release_contains_offline_linked_docs_changelog_and_root_owned_members(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -1,0 +1,17 @@
+{
+  "name": "drcom4scut-website",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "prepare:docs": "node scripts/prepare.mjs",
+    "dev": "npm run prepare:docs && vitepress dev . --host 127.0.0.1",
+    "build": "npm run prepare:docs && vitepress build . && python3 scripts/check-links.py",
+    "preview": "vitepress preview . --host 127.0.0.1"
+  },
+  "devDependencies": {
+    "vitepress": "1.6.4"
+  },
+  "overrides": {
+    "vite": "6.4.5"
+  }
+}

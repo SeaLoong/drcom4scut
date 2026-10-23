@@ -22,8 +22,8 @@ chmod 600 /etc/drcom4scut/config.yml
 chmod 600 /etc/config/drcom4scut
 if [ ! -e /etc/drcom4scut/password ]; then
 	: > /etc/drcom4scut/password
-	chmod 600 /etc/drcom4scut/password
 fi
+chmod 600 /etc/drcom4scut/password
 temporary_binary="/usr/bin/.drcom4scut.$$"
 temporary_service="/etc/init.d/.drcom4scut.$$"
 trap 'rm -f "$temporary_binary" "$temporary_service"' 0

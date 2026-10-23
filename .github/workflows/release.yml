@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Release tag, matching Cargo.toml (for example v0.4.1)
+        description: Release tag, matching Cargo.toml (for example v0.5.1)
         required: true
         type: string
       draft:
@@ -78,6 +78,4 @@ jobs:
           fi
           # A non-forced push rejects a tag created at another commit during builds.
           git push origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
-          args=("$RELEASE_TAG" --verify-tag --title "$RELEASE_TAG" --generate-notes)
-          if [[ "$CREATE_DRAFT" == true ]]; then args+=(--draft); fi
-          gh release create "${args[@]}" dist/*.tar.gz dist/*.zip dist/SHA256SUMS
+          python3 .github/scripts/publish_release.py

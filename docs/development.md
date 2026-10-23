@@ -2,7 +2,7 @@
 
 [返回首页](../README.md)
 
-**只想上网不需要编译程序。** 请从[下载安装](../README.md#下载与安装)或[图形界面](https://github.com/SeaLoong/drcom4scutGUI#readme)开始。本页面向希望修改源码、自己构建程序或维护发布的人；开发命令均在源码仓库根目录执行。
+使用客户端请从[下载安装](../README.md#下载与安装)或[图形界面](https://github.com/SeaLoong/drcom4scutGUI#readme)开始。本页面向希望修改源码、自己构建程序或维护发布的人；开发命令均在源码仓库根目录执行。
 
 | 你的目标 | 从这里开始 |
 | --- | --- |
@@ -33,7 +33,7 @@ cargo test --locked --no-default-features
 
 默认构建的 HTTPS 加密连接部分需要本机 C 编译工具。Windows 还需 [Npcap SDK 1.15](https://npcap.com/dist/npcap-sdk-1.15.zip) 的匹配架构库：x64 使用 `Lib/x64`，ARM64 使用 `Lib/ARM64`，其中均包含 `Packet.lib` 和 `wpcap.lib`。将所选目录加入 `LIB`，并设置 `LIBPCAP_LIBDIR`。CI 使用[固定 SDK 安装步骤](https://github.com/SeaLoong/drcom4scut/blob/master/.github/actions/setup-npcap/action.yml)，保留正常 TLS 校验。MSVC 在 `build.rs` 中延迟加载捕获 DLL；真实抓包仍需安装 Npcap。
 
-macOS 使用 Xcode Command Line Tools 提供的系统 SDK 和链接器；抓包走系统 BPF，不依赖 Npcap。Intel 与 Apple Silicon 分别原生构建、测试及发布，产物是各自架构的 Mach-O，不是通用二进制。核心的操作系统基线参考 [Rust Apple 目标说明](https://doc.rust-lang.org/rustc/platform-support/apple-darwin.html)和实际使用的依赖，不能将 CI runner 系统版本或 GUI 的 .NET 要求直接当作核心最低版本。运行权限见 [macOS 指南](macos.md)。
+macOS 使用 Xcode Command Line Tools 提供的系统 SDK 和链接器；抓包走系统 BPF，不依赖 Npcap。Intel 与 Apple Silicon 分别原生构建、测试及发布，产物是各自架构的 Mach-O，不是通用二进制。核心的操作系统基线参考 [Rust Apple 目标说明](https://doc.rust-lang.org/rustc/platform-support/apple-darwin.html)和实际使用的依赖，核心最低系统要求独立核对，GUI 则使用对应 .NET 的系统要求。运行权限见 [macOS 指南](macos.md)。
 
 ## 构建特性
 
@@ -46,7 +46,7 @@ macOS 使用 Xcode Command Line Tools 提供的系统 SDK 和链接器；抓包�
 | 路由器 | `--no-default-features --features log4rs,portal` | 文件日志、有线认证、显式允许的 HTTP Portal |
 | HTTPS 门户 | `--features portal-tls` | 启用 `portal` 及证书校验；交叉编译需匹配的 TLS C/汇编工具链 |
 
-HTTP 是未加密的网页请求，HTTPS 使用 TLS 加密并检查网站证书。只包含 HTTP 的程序会拒绝 HTTPS，不能通过关闭证书检查或偷偷改成 HTTP 来代替加密支持。`log4rs` 只启用实际使用的日志 appender/编码/滚动功能，不需要其 YAML 配置解析器。
+HTTP 是未加密的网页请求，HTTPS 使用 TLS 加密并检查网站证书。HTTPS 入口需要启用 `portal-tls`，以保持加密传输和证书检查。`log4rs` 只启用实际使用的日志 appender/编码/滚动功能，不需要其 YAML 配置解析器。
 
 ## 模块与运行模型
 
@@ -62,7 +62,7 @@ HTTP 是未加密的网页请求，HTTPS 使用 TLS 加密并检查网站证书�
 
 ## 测试层次
 
-下面区分“代码逻辑通过”“在目标系统运行通过”和“在学校真的认证成功”。前两类自动测试不能推出第三类结论，发布说明中也应分开记录。`loopback` 指本机回环地址，`fixture` 指专门构造的测试输入或环境，QEMU 是运行其他处理器程序的模拟器。
+验证分为程序逻辑、目标平台运行和校园实网三层，发布说明分别记录各层结果。`loopback` 指本机回环地址，`fixture` 指专门构造的测试输入或环境，QEMU 是运行其他处理器程序的模拟器。
 
 | 范围 | 覆盖内容 | 运行条件 |
 | --- | --- | --- |
@@ -76,7 +76,7 @@ HTTP 是未加密的网页请求，HTTPS 使用 TLS 加密并检查网站证书�
 | OpenWrt | procd/UCI、私有路径、LuCI JS/RPC、安装、ABI 与归档 | Shell、Python、Node fixtures |
 | 其他 CPU | 相同协议与子进程测试，发布二进制版本检查 | 对应硬件或 QEMU |
 
-测试应确认实际执行并完成，零测试、跳过和通过分别报告。交叉 `cargo check` 不证明原生 macOS 或 Windows 行为。模拟认证、QEMU 和策略 fixtures 也不能代替校园交换机、实际 Npcap/BPF、路由器网卡、LuCI 浏览器或长期在线验证。
+测试报告分别记录通过、跳过及未运行项。原生行为由对应平台 runner 检查，校园交换机、抓包权限、路由器和长期在线能力则通过真实环境验证。
 
 并发测试通过门闩或虚拟时钟安排事件，不依赖主机在几毫秒内调度。ARMv5 测试不得假设存在 64 位原子。跨架构时 `CARGO_TARGET_*_RUNNER` 只启动测试主程序，CLI 子进程另需 `DRCOM_TEST_RUNNER`。
 
@@ -95,7 +95,7 @@ powershell -NoProfile -NonInteractive -File scripts/test-service-acl.ps1
 
 ## OpenWrt 交叉构建
 
-如果只是给路由器安装客户端，使用[现成下载包](openwrt.md)即可。以下步骤供需要自编译的人使用；目标名称同时限定处理器、系统及程序调用方式，不能只把文件改名来适配另一台路由器。
+如果只是给路由器安装客户端，使用[现成下载包](openwrt.md)即可。以下步骤供需要自编译的人使用；目标名称同时限定处理器、系统及程序调用方式，请按目标设备选择。
 
 当前发布平台和特性以 [platforms.json](https://github.com/SeaLoong/drcom4scut/blob/master/.github/scripts/platforms.json) 为准。静态路由器产物使用 Rust 分发中的 self-contained musl 和 `rust-lld`；例如 ARMv7：
 
@@ -112,7 +112,7 @@ RUSTFLAGS='-C linker=rust-lld -C target-feature=+crt-static' \
 python3 .github/scripts/package_release.py armv7-unknown-linux-musleabi --runner qemu-arm
 ```
 
-安装对应 QEMU user-mode 程序后执行测试。桌面 GNU Linux、Windows、macOS 的 x64/ARM64 目标使用匹配架构的原生 runner；静态 x64/ARM64 也在对应 Linux runner 上执行，ARMv5TE、ARMv7 和 RISC-V 通过 QEMU 执行。没有提供当前稳定工具链可构建、可测试的 MIPS/MIPSEL 发布目标；平台清单中的产物也不等于任意路由器型号已通过实网验证。
+安装对应 QEMU user-mode 程序后执行测试。桌面 GNU Linux、Windows、macOS 的 x64/ARM64 目标使用匹配架构的原生 runner；静态 x64/ARM64 也在对应 Linux runner 上执行，ARMv5TE、ARMv7 和 RISC-V 通过 QEMU 执行。目前的发布清单覆盖五个静态路由器目标，具体设备兼容性通过真实固件和校园网络验证。
 
 ## LuCI 页面包
 
@@ -132,7 +132,7 @@ SDK 按其发行版生成 `.ipk` 或 `.apk`。该包只包含 JS、Shell、JSON 
 
 [Rust CI](https://github.com/SeaLoong/drcom4scut/blob/master/.github/workflows/rust.yml) 在 push、pull request 或手动运行时调用[共用验证工作流](https://github.com/SeaLoong/drcom4scut/blob/master/.github/workflows/validate-build.yml)。它运行格式、两组严格 Clippy、默认/精简及目标特性测试、平台构建和脚本回归。清单包含六个桌面目标和五个静态路由器目标，共十一个；runner、模拟器和 Npcap 库架构在同一清单中明确声明。
 
-平台清单同时驱动构建矩阵、[打包器](https://github.com/SeaLoong/drcom4scut/blob/master/.github/scripts/package_release.py)和[发布完整性检查](https://github.com/SeaLoong/drcom4scut/blob/master/.github/scripts/verify_release.py)。Cargo 命令显式指定 target，打包前核对 ELF/PE/Mach-O、CPU、位宽、端序、静态属性、ARM 基线/ABI 和实际版本。包内包含程序、配置示例、文档、许可证及相应 OpenWrt 资源，并生成 SHA-256。
+平台清单同时驱动构建矩阵、[打包器](https://github.com/SeaLoong/drcom4scut/blob/master/.github/scripts/package_release.py)和[发布完整性检查](https://github.com/SeaLoong/drcom4scut/blob/master/.github/scripts/verify_release.py)。Cargo 命令显式指定 target，打包前核对 ELF/PE/Mach-O、CPU、位宽、端序、静态属性、ARM 基线/ABI 和实际版本。包内包含程序、配置示例、文档、许可证及相应 OpenWrt 资源，并生成 SHA-256。`BUILD-INFO.json` 记录源码版本、提交、工作区状态和目标平台，汇总发布时再次核对。
 
 ## 自动预发布
 
@@ -149,9 +149,29 @@ Preview 是给使用者试用最新代码的开发预览，正式版 Release 仍
 ## 手动发布
 
 1. 更新 `Cargo.toml`、相关打包元数据和 [CHANGELOG](../CHANGELOG.md)，提交源码及锁文件，确认普通 CI 结果。
-2. 在 GitHub 打开 **Actions → Manual release → Run workflow**，选择待发布的分支，填写与 `Cargo.toml` 版本一致的标签，如 `v0.5.0`。
+2. 在 GitHub 打开 **Actions → Manual release → Run workflow**，选择待发布的分支，填写与 `Cargo.toml` 版本一致的标签，如 `v0.5.1`。
 3. `draft` 默认开启。保留它会创建草稿；取消后会直接发布。
 
-工作流重新执行共用验证、检查全部平台包与校验和，核对最终标签仍指向已验证提交，然后创建 Release。它拒绝覆盖其他提交的标签及既有 Release。只有最终发布 job 有写权限。正式发布仅接受手动触发，普通 Git 推送只会按上述条件自动创建 Preview。
+工作流重新执行共用验证、检查全部平台包与校验和，核对最终标签仍指向已验证提交，然后上传到草稿。全部远端文件核验完成后，按 `draft` 选项保留草稿或公开发布。它拒绝覆盖其他提交的标签及既有 Release。只有最终发布 job 有写权限。正式发布仅接受手动触发，普通 Git 推送只会按上述条件自动创建 Preview。
 
 来源快照、许可证和协议证据见[派生仓库记录](references-forks.md)与[相关客户端记录](references-clients.md)。新增兼容行为应附独立报文样本或可重复的协议测试，并明确实机验证范围。
+
+## 软件首页与帮助中心
+
+网站采用 [VitePress](https://vitepress.dev/) 构建，入口组织参考 [Vite 文档](https://github.com/vitejs/vite/tree/main/docs)、[Syncthing 帮助](https://docs.syncthing.net/) 与 [RustDesk 项目首页](https://github.com/rustdesk/rustdesk)：先选择使用场景，再进入安装和具体任务。
+
+Markdown 是文档的唯一来源。`site/scripts/prepare.mjs` 将本仓库的 README、docs、更新记录和安全说明，以及图形界面仓库的对应文档转换为站点内容；相互引用的帮助链接转为站内导航。图形界面文档固定到 `site/sources.json` 的提交号，Pages 工作流按该提交检出，构建时无需向浏览者请求外部服务。
+
+首次启用网站时，在 GitHub 仓库的 **Settings → Pages → Build and deployment → Source** 选择 **GitHub Actions**。已启用的仓库沿用现有设置；随后运行 **Website and help** 工作流即可发布网站。
+
+本地准备 Node.js 24，并将两个仓库放在同一父目录，执行：
+
+```sh
+npm ci --prefix site
+npm run build --prefix site
+npm run preview --prefix site
+```
+
+图形界面放在其他目录时，用 `GUI_DOCS_DIR=/完整路径/drcom4scutGUI` 指定。构建结果为 `site/.vitepress/dist`；构建自动检查生成页面的本地链接、图片和标题锚点。本地搜索随静态页面发布，用户输入的搜索词留在浏览器。
+
+VitePress 当前稳定版搭配固定的 Vite 6.4.5 安全修复版本，锁文件保存确切依赖。维护时执行 `npm audit --prefix site`，并同时验证构建、导航和搜索。[Website and help](https://github.com/SeaLoong/drcom4scut/actions/workflows/pages.yml) 在推送时构建页面，PR 只检查构建；master 或手动运行可部署。[Dependency audit](https://github.com/SeaLoong/drcom4scut/actions/workflows/dependency-audit.yml) 每周检查已锁定依赖；正式发布软件仍使用前述手动流程。

@@ -333,7 +333,7 @@ impl<'a> ConnectionHooks<'a> {
     }
 }
 
-async fn udp_supervisor(
+pub(crate) async fn udp_supervisor(
     settings: &Settings,
     mut auth: watch::Receiver<ChannelData>,
     ready: watch::Sender<bool>,

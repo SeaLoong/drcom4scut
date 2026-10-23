@@ -63,6 +63,11 @@ fn help_and_version_do_not_create_config_or_open_device() {
     assert!(output_text(&help).contains("--control-pipe"));
     assert!(output_text(&help).contains("--control-socket"));
     assert!(output_text(&help).contains("--password-stdin"));
+    for subcommand in ["run", "doctor", "init", "status", "logs"] {
+        let help = run(&dir, &[subcommand, "--help"]);
+        assert!(help.status.success(), "{}", output_text(&help));
+        assert!(!output_text(&help).contains("panicked"));
+    }
     let version = run(&dir, &["--version"]);
     assert!(version.status.success());
     assert!(output_text(&version).contains(env!("CARGO_PKG_VERSION")));
@@ -93,6 +98,86 @@ fn valid_config_check_needs_no_device_and_does_not_echo_password() {
         std::fs::read(dir.path().join("config.yml")).unwrap(),
         before
     );
+}
+
+#[test]
+fn checking_logout_configuration_never_opens_capture_or_sends_logoff() {
+    let dir = TempDir::new();
+    // Logout is credential-free. An impossible interface makes an accidental
+    // capture open observable without touching a real campus connection.
+    std::fs::write(
+        dir.path().join("config.yml"),
+        "interface: drcom4scut-test-interface-that-does-not-exist\n",
+    )
+    .unwrap();
+    let output = run(&dir, &["--check-config", "--logoff"]);
+    assert!(output.status.success(), "{}", output_text(&output));
+    assert!(output_text(&output).contains("Configuration is valid."));
+    assert!(!dir.path().join("logs").exists());
+}
+
+#[test]
+fn ambiguous_service_actions_are_rejected_before_service_management() {
+    let dir = TempDir::new();
+    let actions = [
+        "--service-run",
+        "--service-install",
+        "--service-start",
+        "--service-stop",
+        "--service-status",
+        "--service-uninstall",
+    ];
+    for (index, action) in actions.iter().enumerate() {
+        for other in actions[index + 1..]
+            .iter()
+            .copied()
+            .chain(["--check-config", "--logoff"])
+        {
+            // Global options have the same conflict rules before and after a
+            // subcommand, including in debug builds with Clap's assertions.
+            for arguments in [vec![*action, other], vec!["run", *action, other]] {
+                let output = run(&dir, &arguments);
+                // Clap rejects conflicts with exit 2 before dispatch can
+                // register, start, stop, remove, or enter a Windows service.
+                assert_eq!(output.status.code(), Some(2), "{}", output_text(&output));
+                assert!(output_text(&output).contains("cannot be used with"));
+            }
+        }
+    }
+    assert!(!dir.path().join("config.yml").exists());
+}
+
+#[test]
+fn inspection_commands_cannot_manage_services_or_change_connections() {
+    let dir = TempDir::new();
+    for inspection in [
+        "--doctor",
+        "--list-interfaces",
+        "--init-config",
+        "doctor",
+        "init",
+        "status",
+        "logs",
+    ] {
+        for action in [
+            "--service-run",
+            "--service-install",
+            "--service-start",
+            "--service-stop",
+            "--service-status",
+            "--service-uninstall",
+            "--logoff",
+            "--check-config",
+        ] {
+            for arguments in [[inspection, action], [action, inspection]] {
+                let output = run(&dir, &arguments);
+                assert_eq!(output.status.code(), Some(1), "{}", output_text(&output));
+                assert!(output_text(&output).contains("Choose one client action"));
+                assert!(!dir.path().join("config.yml").exists());
+                assert!(!dir.path().join("logs").exists());
+            }
+        }
+    }
 }
 
 #[test]
@@ -140,6 +225,53 @@ fn malformed_yaml_does_not_print_source_lines_or_panic() {
     assert!(output_text(&output).contains("valid YAML"));
     assert!(!output_text(&output).contains("private-password"));
     assert!(!output_text(&output).contains("panicked"));
+}
+
+#[test]
+fn utf8_bom_configuration_from_windows_editors_is_accepted() {
+    let dir = TempDir::new();
+    std::fs::write(
+        dir.path().join("config.yml"),
+        "\u{feff}username: student\r\npassword: bom-private-password\r\nhostname: pc\r\n",
+    )
+    .unwrap();
+    let output = run(&dir, &["--check-config"]);
+    assert!(output.status.success(), "{}", output_text(&output));
+    assert!(!output_text(&output).contains("bom-private-password"));
+}
+
+#[test]
+fn oversized_configuration_is_rejected_without_parsing_or_echoing_it() {
+    let dir = TempDir::new();
+    let source = format!(
+        "password: private-config-value\n# {}",
+        "x".repeat(1024 * 1024)
+    );
+    std::fs::write(dir.path().join("config.yml"), source).unwrap();
+    let output = run(&dir, &["--check-config"]);
+    assert!(!output.status.success());
+    assert!(output_text(&output).contains("1 MiB size limit"));
+    assert!(!output_text(&output).contains("private-config-value"));
+}
+
+#[cfg(unix)]
+#[test]
+fn linked_configuration_files_keep_their_original_relative_password_directory() {
+    use std::os::unix::fs::{PermissionsExt, symlink};
+    let dir = TempDir::new();
+    std::fs::create_dir(dir.path().join("managed")).unwrap();
+    std::fs::write(
+        dir.path().join("managed/settings.yml"),
+        "username: student\npassword_file: password\nhostname: test-pc\n",
+    )
+    .unwrap();
+    let password = dir.path().join("password");
+    std::fs::write(&password, "private-linked-config-password\n").unwrap();
+    std::fs::set_permissions(&password, std::fs::Permissions::from_mode(0o600)).unwrap();
+    symlink("managed/settings.yml", dir.path().join("config.yml")).unwrap();
+    let output = run(&dir, &["--check-config"]);
+    assert!(output.status.success(), "{}", output_text(&output));
+    assert!(!output_text(&output).contains("private-linked-config-password"));
 }
 
 #[test]
@@ -288,6 +420,39 @@ fn nonregular_password_file_is_rejected_without_waiting_for_fifo_writer() {
     assert!(!output.status.success());
     assert!(output_text(&output).contains("Password file must be a regular file"));
     assert!(!output_text(&output).contains("e2e-private-password"));
+}
+
+#[cfg(unix)]
+#[test]
+fn nonregular_configuration_is_rejected_without_waiting_for_fifo_writer() {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    use std::process::Stdio;
+    use std::time::{Duration, Instant};
+
+    let dir = TempDir::new();
+    let fifo = dir.path().join("config.yml");
+    let fifo_name = CString::new(fifo.as_os_str().as_bytes()).unwrap();
+    // SAFETY: the path is an owned, terminated C string with no borrowed state.
+    assert_eq!(unsafe { libc::mkfifo(fifo_name.as_ptr(), 0o600) }, 0);
+    let mut child = command(&dir)
+        .arg("--check-config")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while child.try_wait().unwrap().is_none() {
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("configuration validation waited for a FIFO writer");
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let output = child.wait_with_output().unwrap();
+    assert!(!output.status.success());
+    assert!(output_text(&output).contains("Configuration must be a regular file"));
 }
 
 #[cfg(feature = "portal")]

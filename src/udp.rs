@@ -18,6 +18,10 @@ use crate::util::{ChannelData, State, random_vec};
 
 mod packet;
 
+// Brief packet loss can recover using the current session. Repeated failures
+// need a new server token rather than an endless stream of stale Alive packets.
+const MISSED_HEARTBEAT_CYCLES_BEFORE_RECONNECT: u32 = 3;
+
 #[derive(Default, Debug, PartialEq, Eq, Clone)]
 struct ProcessData {
     counter: u8,
@@ -169,6 +173,7 @@ impl<'a> Process<'a> {
         };
         let mut heartbeat = Instant::now() + self.heartbeat_interval();
         let mut established = false;
+        let mut missed_heartbeat_cycles = 0;
         loop {
             let deadline = pending.as_ref().map_or(heartbeat, |p| p.deadline);
             tokio::select! {
@@ -181,6 +186,7 @@ impl<'a> Process<'a> {
                             // Reauthentication invalidates the previous session's checksum.
                             self.set_ready(false);
                             established = false;
+                            missed_heartbeat_cycles = 0;
                             self.data = ProcessData { cks_md5: event.data, ..ProcessData::default() };
                             phase = Phase::ResponseAlive;
                             pending = match self.transmit(self.misc_alive()).await {
@@ -196,11 +202,15 @@ impl<'a> Process<'a> {
                     if let Some(ref mut packet) = pending {
                         if packet.retries >= self.settings.retry.count.max(0) as u32 {
                             if established && matches!(phase, Phase::HeartbeatAlive | Phase::Heartbeat2 | Phase::Heartbeat4) {
-                                // Some campus servers do not answer every UDP keepalive.
-                                // Preserve healthy EAP authorization and try a new cycle;
-                                // startup/initial handshakes still have strict deadlines.
-                                error!("UDP heartbeat reply timeout; keeping EAP authorization.");
                                 self.set_ready(false);
+                                missed_heartbeat_cycles += 1;
+                                if missed_heartbeat_cycles >= MISSED_HEARTBEAT_CYCLES_BEFORE_RECONNECT {
+                                    // The supervisor rebuilds only UDP, using the existing
+                                    // EAP authorization and its normal reconnect delay.
+                                    error!("UDP heartbeat replies remain unavailable; refreshing the UDP session.");
+                                    return State::Stop;
+                                }
+                                error!("UDP heartbeat reply timeout; keeping EAP authorization and retrying.");
                                 pending = None;
                                 phase = Phase::Idle;
                                 heartbeat = Instant::now() + self.heartbeat_interval();
@@ -255,6 +265,7 @@ impl<'a> Process<'a> {
                         }
                         (Phase::StartupAck, HeaderType::MiscHeartbeat) if HeartbeatType::from_vec(&raw).0 == 6 => {
                             info!("UDP startup heartbeat completed.");
+                            missed_heartbeat_cycles = 0;
                             phase = Phase::Idle;
                             pending = None;
                             established = true;
@@ -273,6 +284,7 @@ impl<'a> Process<'a> {
                         }
                         (Phase::Heartbeat4, HeaderType::MiscHeartbeat) if raw.len() >= 6 && HeartbeatType::from_vec(&raw).0 == 4 => {
                             info!("UDP heartbeat completed.");
+                            missed_heartbeat_cycles = 0;
                             established = true;
                             self.set_ready(true);
                             phase = Phase::Idle;
@@ -738,6 +750,37 @@ mod tests {
                 "UDP loss must not terminate healthy authorization"
             );
         }
+        session.control.send_replace(ChannelData::stopped());
+        assert_eq!(
+            timeout(Duration::from_secs(1), session.task)
+                .await
+                .unwrap()
+                .unwrap(),
+            State::Stop
+        );
+    }
+
+    #[tokio::test]
+    async fn e2e_complete_heartbeat_resets_consecutive_failure_budget() {
+        async fn elapse(duration: Duration) {
+            tokio::time::pause();
+            tokio::time::advance(duration).await;
+            tokio::time::resume();
+        }
+        let session = session(State::Success, 0, 5000).await;
+        login(&session.server).await;
+        heartbeat(&session.server).await;
+        for counter in [3, 5] {
+            // Two missed full exchanges can still recover in place. A complete
+            // reply sequence resets the budget before the next pair of losses.
+            for _ in 0..2 {
+                assert_eq!(receive(&session.server).await[0], 0xff);
+                elapse(Duration::from_secs(5)).await;
+            }
+            assert_eq!(receive(&session.server).await[0], 0xff);
+            heartbeat_at_counter(&session.server, counter).await;
+        }
+        assert_eq!(session.control.borrow().state, State::Success);
         session.control.send_replace(ChannelData::stopped());
         assert_eq!(
             timeout(Duration::from_secs(1), session.task)

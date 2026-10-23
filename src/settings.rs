@@ -12,6 +12,14 @@ use std::str::FromStr;
 /// reading process arguments or initializing global state.
 pub fn command() -> clap::Command {
     use clap::*;
+    const SERVICE_ACTIONS: [&str; 6] = [
+        "service-run",
+        "service-install",
+        "service-start",
+        "service-stop",
+        "service-status",
+        "service-uninstall",
+    ];
     command!(crate_name!())
         .version(crate_version!())
         .author(crate_authors!())
@@ -49,7 +57,7 @@ pub fn command() -> clap::Command {
             arg!(--"require-https-portal" "Require HTTPS even if config allows an HTTP portal.").action(ArgAction::SetTrue),
             arg!(--"portal-ac-ip" <IP> "Explicit portal access controller IPv4."),
             arg!(--"portal-client-ip" <IP> "Explicit portal client IPv4."),
-            arg!(--logoff "Send one bounded Logoff/logout without starting authentication.").action(ArgAction::SetTrue),
+            arg!(--logoff "Send one bounded Logoff/logout without starting authentication.").action(ArgAction::SetTrue).conflicts_with_all(SERVICE_ACTIONS),
             arg!(--"profile" <NAME> "Wire profile: legacy or windows31.").value_parser(["legacy", "legacy-2a", "windows31", "windows-31"]),
             arg!(--"eap-ip" <IP> "Override IPv4 encoded in EAP (does not select the local source)."),
             arg!(--"udp-ip" <IP> "Override IPv4 encoded in UDP (does not select the local source)."),
@@ -60,8 +68,19 @@ pub fn command() -> clap::Command {
             arg!(-N --hostname <hostname> "Host name sent to the server."),
             arg!(-t --time <time> "Time to reconnect (HH:MM)."),
             arg!(--"check-config" "Validate configuration without opening network devices.")
-                .action(ArgAction::SetTrue),
-        ].map(|argument| argument.global(true)))
+                .action(ArgAction::SetTrue).conflicts_with_all(SERVICE_ACTIONS),
+        ].map(|argument| {
+            // Global arguments propagate to subcommands; groups do not. Attach
+            // conflicts to the arguments so `run --service-start --service-stop`
+            // is rejected before any service operation on every platform.
+            if SERVICE_ACTIONS.contains(&argument.get_id().as_str()) {
+                let conflicts: Vec<_> = SERVICE_ACTIONS.into_iter()
+                    .filter(|name| *name != argument.get_id().as_str()).collect();
+                argument.conflicts_with_all(conflicts).global(true)
+            } else {
+                argument.global(true)
+            }
+        }))
         .subcommand(clap::Command::new("run").about("Run the authentication client (default)."))
         .subcommand(clap::Command::new("doctor").about("Inspect interfaces and capture prerequisites."))
         .subcommand(clap::Command::new("init").about("Create a configuration template."))
@@ -74,6 +93,7 @@ pub fn load() -> Result<Settings, String> {
 }
 
 const DEFAULT_CONFIG_FILE: &str = include_str!("default_config.yml");
+const MAX_CONFIG_BYTES: u64 = 1024 * 1024;
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone, Copy, Default)]
 pub enum Profile {
@@ -393,8 +413,47 @@ impl Settings {
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
             Err(_) => return Err("Cannot create configuration file".to_owned()),
         }
+        // Inspect the opened handle as well as the path. O_NONBLOCK prevents a
+        // path replaced by a FIFO from hanging startup between stat and open.
+        // Symlinks to ordinary files remain supported for managed deployments.
+        if !std::fs::metadata(path)
+            .map_err(|_| "Cannot inspect configuration file")?
+            .is_file()
+        {
+            return Err("Configuration must be a regular file".into());
+        }
+        let mut options = std::fs::OpenOptions::new();
+        options.read(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.custom_flags(libc::O_NONBLOCK);
+        }
+        let file = options
+            .open(path)
+            .map_err(|_| "Cannot open configuration file")?;
+        let metadata = file
+            .metadata()
+            .map_err(|_| "Cannot inspect configuration file")?;
+        if !metadata.is_file() {
+            return Err("Configuration must be a regular file".into());
+        }
+        if metadata.len() > MAX_CONFIG_BYTES {
+            return Err("Configuration file exceeds the 1 MiB size limit".into());
+        }
+        // The limit also applies if another process grows the file after stat.
+        let mut source = String::new();
+        file.take(MAX_CONFIG_BYTES + 1)
+            .read_to_string(&mut source)
+            .map_err(|_| "Cannot read configuration: expected UTF-8 YAML")?;
+        if source.len() as u64 > MAX_CONFIG_BYTES {
+            return Err("Configuration file exceeds the 1 MiB size limit".into());
+        }
+        // Match config::File's Windows-editor compatibility. A leading UTF-8
+        // BOM belongs to the encoding, not to the first YAML key.
+        let source = source.strip_prefix('\u{feff}').unwrap_or(&source);
         Config::builder()
-            .add_source(config::File::new(config_path, FileFormat::Yaml).required(true))
+            .add_source(config::File::from_str(source, FileFormat::Yaml))
             .build()
             // Parser diagnostics can contain complete YAML lines, including passwords.
             .map_err(|_| "Cannot read configuration: expected valid YAML".to_owned())

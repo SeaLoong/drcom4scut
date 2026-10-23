@@ -57,6 +57,13 @@ fn init_log4rs(settings: &Settings) -> Result<(), String> {
     if log::LevelFilter::Off == settings.log.level_filter {
         return Ok(());
     }
+    // The explicit OFF switch keeps logging disabled; otherwise --debug raises
+    // verbosity while preserving a configured TRACE level.
+    let level = if settings.debug {
+        settings.log.level_filter.max(log::LevelFilter::Debug)
+    } else {
+        settings.log.level_filter
+    };
     use log4rs::{
         append::{
             console::ConsoleAppender,
@@ -123,7 +130,7 @@ fn init_log4rs(settings: &Settings) -> Result<(), String> {
     }
 
     let config = config
-        .build(root.build(settings.log.level_filter))
+        .build(root.build(level))
         .map_err(|_| "Cannot build log configuration".to_owned())?;
 
     log4rs::init_config(config).map_err(|_| "Cannot initialize log configuration".to_owned())?;

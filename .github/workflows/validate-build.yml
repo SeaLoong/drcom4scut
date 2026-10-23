@@ -13,7 +13,7 @@ env:
 jobs:
   quality:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
     outputs:
       matrix: ${{ steps.platforms.outputs.matrix }}
     steps:
@@ -21,6 +21,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
           components: rustfmt, clippy
+      - name: Audit locked Rust dependencies
+        run: |
+          cargo install --locked cargo-audit --version 0.22.2
+          cargo audit --deny warnings
       - run: cargo +stable fmt --all -- --check
       - run: cargo +stable clippy --locked --all-targets --all-features -- -D warnings
       - run: cargo +stable clippy --locked --all-targets --no-default-features -- -D warnings

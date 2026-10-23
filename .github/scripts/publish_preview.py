@@ -2,6 +2,7 @@
 
 from datetime import datetime
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -14,6 +15,9 @@ ROOT = Path(__file__).resolve().parents[2]
 REPOSITORIES = {"SeaLoong/drcom4scut", "SeaLoong/drcom4scutGUI"}
 PREVIEW_TAG = re.compile(r"preview-([1-9][0-9]*)-([1-9][0-9]*)-([0-9a-f]{8})")
 SHA = re.compile(r"[0-9a-f]{40}")
+notes_spec = importlib.util.spec_from_file_location("release_notes", Path(__file__).with_name("release_notes.py"))
+release_notes = importlib.util.module_from_spec(notes_spec)
+notes_spec.loader.exec_module(release_notes)
 
 
 def run_identity(environment):
@@ -63,8 +67,8 @@ def marker(repository, number, attempt, sha):
     return f"<!-- drcom4scut-preview {repository} {number} {attempt} {sha} -->"
 
 
-def verify_draft(release, tag, sha, assets):
-    if (release.get("draft") is not True or release.get("prerelease") is not True
+def verify_draft(release, tag, sha, assets, *, prerelease=True):
+    if (release.get("draft") is not True or release.get("prerelease") is not prerelease
             or release.get("tag_name") != tag or release.get("target_commitish") != sha):
         raise ValueError("Preview draft identity or state changed")
     uploaded = release.get("assets", [])
@@ -232,8 +236,8 @@ def publish_preview(environment, directory, releases=None):
         print("Skipping preview: master moved or an identical/newer CI run was published")
         return False
     releases.verify_tag_target(tag, sha)
-    notes = (f"Development preview of `{sha}`.\n\n"
-             f"[Build and tests](https://github.com/{repository}/actions/runs/{run_id})\n\n"
+    notes = (release_notes.render(repository, sha, tag, preview=True) + "\n"
+             + f"[Build and tests](https://github.com/{repository}/actions/runs/{run_id})\n\n"
              f"{marker(repository, number, attempt, sha)}\n")
     releases.create(tag, sha, notes)
     for path in assets:

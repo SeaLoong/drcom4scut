@@ -346,6 +346,7 @@ impl PortalClient {
     }
 
     async fn online_status(&self, identity: Identity) -> Result<PortalStatus, PortalError> {
+        log::debug!("Checking this device's portal session.");
         let mut url = self.endpoint("eportal/portal/online_list", true)?;
         url.query_pairs_mut().extend_pairs([
             ("callback", CALLBACK.to_owned()),

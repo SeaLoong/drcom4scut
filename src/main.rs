@@ -17,6 +17,7 @@ fn main() -> std::process::ExitCode {
 
 fn dispatch() -> Result<(), String> {
     let matches = settings::command().get_matches();
+    validate_action(&matches)?;
     let config = matches.get_one::<String>("config").expect("default config");
     if matches.get_flag("service-run") {
         return drcom4scut::service::dispatch();
@@ -102,6 +103,10 @@ fn dispatch() -> Result<(), String> {
         return Ok(());
     }
     let settings = Settings::from_matches(&matches)?;
+    if settings.check_config {
+        println!("Configuration is valid.");
+        return Ok(());
+    }
     if settings.logoff && settings.mode == settings::Mode::Eap {
         let device = std::sync::Arc::new(
             device::get_device_on(settings.interface.as_deref(), settings.mac, settings.ip)
@@ -119,10 +124,6 @@ fn dispatch() -> Result<(), String> {
                 .map_err(|_| "Logoff timed out".to_owned())?
                 .map_err(|error| format!("Logoff failed: {error}"))
         });
-    }
-    if settings.check_config {
-        println!("Configuration is valid.");
-        return Ok(());
     }
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -151,6 +152,33 @@ fn dispatch() -> Result<(), String> {
             }
         }
     })
+}
+
+/// Resolve aliases before acting so a diagnostic command cannot accidentally
+/// manage a service, log out, or open capture through a second action flag.
+fn validate_action(matches: &clap::ArgMatches) -> Result<(), String> {
+    let subcommand = matches.subcommand_name();
+    let actions = [
+        matches.get_flag("list-interfaces"),
+        matches.get_flag("doctor") || subcommand == Some("doctor"),
+        matches.get_flag("init-config") || subcommand == Some("init"),
+        matches.get_flag("check-config"),
+        subcommand == Some("status"),
+        subcommand == Some("logs"),
+        // Checking a logout configuration is intentionally credential-free and
+        // performs only validation, just as checking a login configuration does.
+        matches.get_flag("logoff") && !matches.get_flag("check-config"),
+        matches.get_flag("service-run"),
+        matches.get_flag("service-install"),
+        matches.get_flag("service-start"),
+        matches.get_flag("service-stop"),
+        matches.get_flag("service-status"),
+        matches.get_flag("service-uninstall"),
+    ];
+    if actions.into_iter().filter(|enabled| *enabled).count() > 1 {
+        return Err("Choose one client action per command; run inspection and service operations separately".into());
+    }
+    Ok(())
 }
 
 async fn shutdown_signal() -> Result<(), String> {

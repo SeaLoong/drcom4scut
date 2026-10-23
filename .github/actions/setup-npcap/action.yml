@@ -1,5 +1,5 @@
 name: Install Npcap SDK
-description: Download the version-pinned official SDK using normal TLS verification.
+description: Download the version-pinned official SDK with TLS and SHA-256 verification.
 inputs:
   architecture:
     description: Native SDK library architecture (x64 or ARM64).
@@ -21,6 +21,9 @@ runs:
         $sdkRoot = Join-Path $env:RUNNER_TEMP 'npcap-sdk-1.15'
         $archive = Join-Path $env:RUNNER_TEMP 'npcap-sdk-1.15.zip'
         Invoke-WebRequest -Uri 'https://npcap.com/dist/npcap-sdk-1.15.zip' -OutFile $archive
+        if ((Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash -ne '52c7b9fb4abee3ad9fe739bb545c3efe77b731c8e127122bdf328eafdae3ed4f') {
+          throw 'Npcap SDK checksum does not match the pinned official archive'
+        }
         Expand-Archive -LiteralPath $archive -DestinationPath $sdkRoot -Force
         foreach ($name in @('Packet.lib', 'wpcap.lib')) {
           $library = Join-Path $sdkRoot "Lib/$sdkArch/$name"
