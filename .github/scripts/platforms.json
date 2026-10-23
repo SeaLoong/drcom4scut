@@ -15,7 +15,7 @@
     "openwrt": true,
     "features": [
       "log4rs",
-      "portal"
+      "portal-tls"
     ],
     "runner": "ubuntu-24.04"
   },
@@ -27,7 +27,7 @@
     "openwrt": true,
     "features": [
       "log4rs",
-      "portal"
+      "portal-tls"
     ],
     "runner": "ubuntu-24.04-arm"
   },
@@ -40,7 +40,7 @@
     "arm_arch": "v5TE",
     "features": [
       "log4rs",
-      "portal"
+      "portal-tls"
     ],
     "runner": "ubuntu-24.04",
     "emulator": "qemu-arm"
@@ -54,7 +54,7 @@
     "arm_arch": "v7",
     "features": [
       "log4rs",
-      "portal"
+      "portal-tls"
     ],
     "runner": "ubuntu-24.04",
     "emulator": "qemu-arm"
@@ -67,7 +67,7 @@
     "openwrt": true,
     "features": [
       "log4rs",
-      "portal"
+      "portal-tls"
     ],
     "runner": "ubuntu-24.04",
     "emulator": "qemu-riscv64"

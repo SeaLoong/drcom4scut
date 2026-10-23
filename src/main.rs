@@ -19,6 +19,47 @@ fn dispatch() -> Result<(), String> {
     let matches = settings::command().get_matches();
     validate_action(&matches)?;
     let config = matches.get_one::<String>("config").expect("default config");
+    if matches.get_flag("update") || matches.get_flag("check-update") {
+        let options = Settings::update_from_matches(&matches)?.options();
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .map_err(|_| "Cannot start update runtime")?;
+        return runtime.block_on(async {
+            if matches.get_flag("update") {
+                match drcom4scut::update::apply_latest(&options)
+                    .await
+                    .map_err(|error| error.to_string())?
+                {
+                    drcom4scut::update::UpdateOutcome::UpToDate => {
+                        println!("drcom4scut is up to date ({}).", env!("CARGO_PKG_VERSION"));
+                    }
+                    drcom4scut::update::UpdateOutcome::Updated {
+                        version,
+                        restart_required,
+                    } => {
+                        if restart_required {
+                            println!("Installed drcom4scut {version}. Restart drcom4scut to use it.");
+                        } else {
+                            println!("Installed drcom4scut {version}. Start drcom4scut again to use it.");
+                        }
+                    }
+                }
+            } else {
+                match drcom4scut::update::check_latest(&options)
+                    .await
+                    .map_err(|error| error.to_string())?
+                {
+                    Some(release) => println!(
+                        "New drcom4scut version {} is available. Run drcom4scut --update to install.",
+                        release.version
+                    ),
+                    None => println!("drcom4scut is up to date ({}).", env!("CARGO_PKG_VERSION")),
+                }
+            }
+            Ok(())
+        });
+    }
     if matches.get_flag("service-run") {
         return drcom4scut::service::dispatch();
     }
@@ -170,6 +211,8 @@ fn validate_action(matches: &clap::ArgMatches) -> Result<(), String> {
         matches.get_flag("doctor") || subcommand == Some("doctor"),
         matches.get_flag("init-config") || subcommand == Some("init"),
         matches.get_flag("check-config"),
+        matches.get_flag("update"),
+        matches.get_flag("check-update"),
         subcommand == Some("status"),
         subcommand == Some("logs"),
         // Checking a logout configuration is intentionally credential-free and
@@ -183,7 +226,7 @@ fn validate_action(matches: &clap::ArgMatches) -> Result<(), String> {
         matches.get_flag("service-uninstall"),
     ];
     if actions.into_iter().filter(|enabled| *enabled).count() > 1 {
-        return Err("Choose one client action per command; run inspection and service operations separately".into());
+        return Err("Choose one client action per command; run inspection, update and service operations separately".into());
     }
     Ok(())
 }

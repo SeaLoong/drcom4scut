@@ -1,6 +1,6 @@
 [package]
 name = "drcom4scut"
-version = "0.5.1"
+version = "0.6.0"
 rust-version = "1.99"
 authors = ["SeaLoong <sealoongw@foxmail.com>"]
 edition = "2024"
@@ -24,12 +24,20 @@ pnet = "0.35.0"
 rand = "0.10.3"
 hickory-resolver = { version = "0.26.3", default-features = false, features = ["tokio"] }
 tokio = { version = "1.54.1", features = ["rt-multi-thread", "net", "sync", "time", "macros", "signal", "process", "io-util"] }
+flate2 = { version = "1.1.10", default-features = false, features = ["rust_backend"] }
+tar = { version = "0.4.46", default-features = false }
+zip = { version = "9.0.5", default-features = false, features = ["deflate-flate2"] }
+sha2 = "0.11.1"
+semver = "1.0.28"
+tempfile = "3.27.0"
+rustls = { version = "0.23.46", default-features = false, features = ["std", "ring", "tls12"] }
+webpki-roots = "1.0.11"
+rustls-native-certs = "0.8.5"
 
 [dependencies.reqwest]
 version = "0.13.5"
 default-features = false
-features = ["query", "json", "form"]
-optional = true
+features = ["query", "json", "form", "rustls-no-provider"]
 
 [dependencies.config]
 version = "0.15.27"
@@ -53,14 +61,14 @@ strip = true
 
 [features]
 default = ["log4rs", "portal-tls"]
-portal = ["dep:reqwest"]
-portal-tls = ["portal", "reqwest/rustls"]
+portal = []
+portal-tls = ["portal"]
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2.191"
 
 [target.'cfg(windows)'.dependencies]
 pcap = "2.5.0"
-windows-sys = { version = "0.61.2", features = ["Win32_Networking_WinSock", "Win32_System_SystemInformation", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis", "Win32_System_LibraryLoader"] }
+windows-sys = { version = "0.61.2", features = ["Win32_Networking_WinSock", "Win32_System_SystemInformation", "Win32_NetworkManagement_IpHelper", "Win32_NetworkManagement_Ndis", "Win32_System_LibraryLoader", "Win32_Security_Authorization"] }
 
 windows-service = "0.8.1"

@@ -63,6 +63,9 @@ fn help_and_version_do_not_create_config_or_open_device() {
     assert!(output_text(&help).contains("--control-pipe"));
     assert!(output_text(&help).contains("--control-socket"));
     assert!(output_text(&help).contains("--password-stdin"));
+    assert!(output_text(&help).contains("--update"));
+    assert!(output_text(&help).contains("--check-update"));
+    assert!(output_text(&help).contains("--no-update-check"));
     for subcommand in ["run", "doctor", "init", "status", "logs"] {
         let help = run(&dir, &[subcommand, "--help"]);
         assert!(help.status.success(), "{}", output_text(&help));
@@ -83,6 +86,83 @@ fn first_run_creates_template_and_reports_missing_credentials() {
     let template = std::fs::read_to_string(dir.path().join("config.yml")).unwrap();
     assert!(template.contains("host: s.scut.edu.cn"));
     assert!(!output_text(&output).contains("panicked"));
+}
+
+#[test]
+fn update_actions_need_no_authentication_or_configuration_and_never_read_password_input() {
+    for action in ["--update", "--check-update"] {
+        let dir = TempDir::new();
+        // A closed loopback port exercises the update action without ever
+        // reaching GitHub or reading authentication settings/password stdin.
+        let output = command(&dir)
+            .env("NO_PROXY", "127.0.0.1")
+            .env("no_proxy", "127.0.0.1")
+            .args([
+                action,
+                "--password-stdin",
+                "--update-proxy",
+                "https://127.0.0.1:1/",
+            ])
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        let text = output_text(&output);
+        assert!(!text.contains("Username"), "{text}");
+        assert!(!text.contains("password"), "{text}");
+        assert!(!dir.path().join("config.yml").exists());
+        assert!(!dir.path().join("logs").exists());
+        std::fs::write(
+            dir.path().join("config.yml"),
+            "username: 42\npassword_file: missing-private-file\nmode: invalid\nportal: false\n",
+        )
+        .unwrap();
+        let output = command(&dir)
+            .env("NO_PROXY", "127.0.0.1")
+            .env("no_proxy", "127.0.0.1")
+            .args([action, "--update-proxy", "https://127.0.0.1:1/"])
+            .output()
+            .unwrap();
+        let text = output_text(&output);
+        assert!(!output.status.success());
+        assert!(!text.contains("username"), "{text}");
+        assert!(!text.contains("password"), "{text}");
+        assert!(!text.contains("portal"), "{text}");
+    }
+}
+
+#[test]
+fn update_action_conflicts_are_rejected_before_any_side_effect() {
+    let dir = TempDir::new();
+    for update in ["--update", "--check-update"] {
+        for action in [
+            "--list-interfaces",
+            "--doctor",
+            "--init-config",
+            "--check-config",
+            "--logoff",
+            "--service-run",
+            "--service-install",
+            "--service-start",
+            "--service-stop",
+            "--service-status",
+            "--service-uninstall",
+            "doctor",
+            "init",
+            "status",
+            "logs",
+        ] {
+            for args in [[update, action], [action, update]] {
+                let output = run(&dir, &args);
+                assert_eq!(output.status.code(), Some(1), "{}", output_text(&output));
+                assert!(output_text(&output).contains("Choose one client action"));
+                assert!(!dir.path().join("config.yml").exists());
+                assert!(!dir.path().join("logs").exists());
+            }
+        }
+    }
+    let output = run(&dir, &["--update", "--check-update"]);
+    assert_eq!(output.status.code(), Some(2), "{}", output_text(&output));
+    assert!(!dir.path().join("config.yml").exists());
 }
 
 #[test]

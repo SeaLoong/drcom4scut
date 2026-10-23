@@ -38,5 +38,6 @@ features:
     <section><span class="step-number">3</span><h3>点击连接</h3><p>等待窗口显示在线。保留客户端运行，它会在断线后自动尝试恢复。</p></section>
   </div>
   <ScreenshotPreview />
+  <div class="help-panel"><div><h3>已经安装，想更新版本？</h3><p>在窗口中检查图形界面或核心的最新正式版，确认后自动下载安装，继续使用原来的账号和设置。</p></div><a href="./gui/update">查看更新方法 →</a></div>
   <div class="help-panel"><div><h3>使用校园 Wi-Fi？</h3><p>先连接 Wi-Fi，再通过学校网页登录。了解兼容页面的自动登录方式、入口设置和常见问题。</p></div><a href="./guide/portal">查看校园网页登录帮助 →</a></div>
 </div>

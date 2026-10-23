@@ -133,14 +133,50 @@ async fn open(settings: &Settings, preferred: Option<&str>) -> Result<device::De
         })
 }
 
+pub(crate) fn complete_online(no_udp: bool, authorized: bool, udp_ready: bool) -> bool {
+    authorized && (no_udp || udp_ready)
+}
+
 /// All protocol futures belong to this scope; shutdown cancels timers/socket
 /// waits before making one bounded best-effort EAPOL-Logoff transmission.
-pub async fn run(settings: Settings, mut stop: watch::Receiver<bool>) -> Result<(), String> {
+pub async fn run(settings: Settings, stop: watch::Receiver<bool>) -> Result<(), String> {
     crate::logger::init(&settings)?;
+    // GUI hosts have their own update UI. One scheduler is scoped to the whole
+    // standalone client and dropped with its connection future on every exit.
+    let check_updates = settings.update.enabled
+        && settings.control_pipe.is_none()
+        && settings.control_socket.is_none()
+        && !settings.logoff;
+    let update_settings = settings.update.clone();
+    let (online, receiver) = watch::channel(false);
+    let mut update_stop = stop.clone();
+    let connection = run_connection(settings, stop, online);
+    if !check_updates {
+        return connection.await;
+    }
+    tokio::pin!(connection);
+    let updates = async {
+        tokio::select! {
+            biased;
+            _ = shutdown(&mut update_stop) => (),
+            _ = crate::update_schedule::run(&update_settings, receiver) => (),
+        }
+    };
+    tokio::select! {
+        result = &mut connection => result,
+        _ = updates => connection.await,
+    }
+}
+
+async fn run_connection(
+    settings: Settings,
+    mut stop: watch::Receiver<bool>,
+    online_tx: watch::Sender<bool>,
+) -> Result<(), String> {
     if settings.mode == crate::settings::Mode::Portal {
         #[cfg(feature = "portal")]
         {
-            return run_portal(&settings, stop).await;
+            return run_portal(&settings, stop, online_tx).await;
         }
         #[cfg(not(feature = "portal"))]
         {
@@ -184,11 +220,7 @@ pub async fn run(settings: Settings, mut stop: watch::Receiver<bool>) -> Result<
             link_check.tick().await;
             loop {
                 let authorized = auth_rx.borrow().state == State::Success;
-                let online = if settings.no_udp {
-                    authorized
-                } else {
-                    *ready_rx.borrow() && authorized
-                };
+                let online = complete_online(settings.no_udp, authorized, *ready_rx.borrow());
                 write_status(
                     &settings,
                     if online {
@@ -203,6 +235,7 @@ pub async fn run(settings: Settings, mut stop: watch::Receiver<bool>) -> Result<
                     authorized,
                     online,
                 )?;
+                online_tx.send_replace(online);
                 if online {
                     established = true;
                 }
@@ -239,6 +272,7 @@ pub async fn run(settings: Settings, mut stop: watch::Receiver<bool>) -> Result<
                 outcome = &mut monitor => outcome,
             }
         };
+        online_tx.send_replace(false);
         // End the EAP borrow before issuing Logoff. The retained capture read is
         // finite on Unix and nonblocking on Windows; no old protocol task lives on.
         let _ = tokio::time::timeout(Duration::from_secs(1), process.logoff()).await;
@@ -398,7 +432,11 @@ pub(crate) async fn udp_supervisor(
 }
 
 #[cfg(feature = "portal")]
-async fn run_portal(settings: &Settings, mut stop: watch::Receiver<bool>) -> Result<(), String> {
+async fn run_portal(
+    settings: &Settings,
+    mut stop: watch::Receiver<bool>,
+    online: watch::Sender<bool>,
+) -> Result<(), String> {
     let client = crate::portal::PortalClient::new(settings.portal_config())
         .map_err(|error| error.to_string())?;
     let mut current_ip = settings.portal_client_ip.map(IpAddr::V4);
@@ -434,6 +472,7 @@ async fn run_portal(settings: &Settings, mut stop: watch::Receiver<bool>) -> Res
                         current_ip = Some(status.client_ip.into());
                         info!("Portal authorization confirmed online.");
                         write_status(settings, "online", "portal", current_ip, false, true)?;
+                        online.send_replace(true);
                         backoff.reset();
                         connection_hooks.ip = current_ip;
                         if let Err(error) = connection_hooks.transition(true).await {
@@ -459,6 +498,7 @@ async fn run_portal(settings: &Settings, mut stop: watch::Receiver<bool>) -> Res
                                 _ => break,
                             }
                         }
+                        online.send_replace(false);
                         write_status(settings, "offline", "portal", current_ip, false, false)?;
                         connection_hooks.ip = current_ip;
                         if let Err(error) = connection_hooks.transition(false).await {
@@ -493,6 +533,7 @@ async fn run_portal(settings: &Settings, mut stop: watch::Receiver<bool>) -> Res
             _ = shutdown(&mut stop) => Ok(false),
         }
     };
+    online.send_replace(false);
     // This single cleanup path handles cancellation during login, an online
     // check, a retry delay or a lifecycle hook equally. The operation future has
     // already been dropped, so its pending HTTP request/hook is canceled first.

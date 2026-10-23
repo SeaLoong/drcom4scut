@@ -1,4 +1,8 @@
 fn main() {
+    println!(
+        "cargo:rustc-env=DRCOM_BUILD_TARGET={}",
+        std::env::var("TARGET").expect("Cargo build target")
+    );
     println!("cargo:rerun-if-changed=build.rs");
     // Inspection commands and packet-free tests must run before Npcap is
     // installed. Real capture still loads the official runtime when first used.

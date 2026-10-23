@@ -75,6 +75,7 @@ Mac / Linux：
 
 ## 接下来
 
+- [更新程序](update.md)：检查正式版并更新核心，账号和配置继续保留。
 - [连接与排障](troubleshooting.md)：按屏幕提示处理网卡、权限、账号和掉线问题。
 - [Windows 后台服务](windows-service.md)：需要开机后、登录系统前就联网时使用。
 - [配置参考](configuration.md)：修改日志、重连等待等选项。

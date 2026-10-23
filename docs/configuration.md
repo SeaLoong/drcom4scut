@@ -113,6 +113,25 @@ log:
 
 默认日志名为 `latest.log`，约 1 MiB 后存成历史文件，最多保留 10 份压缩历史。`./drcom4scut logs --config config.yml` 显示当前日志最后 200 行；`--no-log` 关闭文件日志。少数精简构建没有文件日志，差异见[构建特性](development.md#构建特性)。分享日志前仍需遮住个人信息。
 
+## 更新设置
+
+核心默认在首次完整连接成功 60 秒后检查正式版，以后每 24 小时检查，只提醒新版本。手动检查与安装见[更新程序](update.md)。
+
+```yaml
+update:
+  enabled: true
+  proxy: https://gh-proxy.com/
+  interval_hours: 24
+```
+
+| 字段 | 作用 |
+| --- | --- |
+| `update.enabled` | `false` 关闭核心自动检查；手动 `--check-update` 和 `--update` 仍可使用 |
+| `update.proxy` | 检查信息、校验清单和程序下载共用的 HTTPS 代理前缀；保留末尾 `/`，不含用户名、密码、查询参数或片段 |
+| `update.interval_hours` | 后续检查间隔，单位小时，整数 `1` 到 `8760` |
+
+`--no-update-check` 只关闭本次运行的自动检查；`--update-proxy URL` 临时覆盖代理。图形界面统一管理自己的更新检查，其代理另在 [GUI 更新设置](https://github.com/SeaLoong/drcom4scutGUI/blob/master/docs/update.md#更换更新代理)中配置。
+
 ## 有线报文兼容选项
 
 **普通用户保持默认即可，不按操作系统选择。** `profile` 是“程序按哪种格式与学校认证服务器说话”的兼容开关，默认 `legacy`。`windows31` 的名字来自另一种客户端报文格式，各操作系统都使用相同的选择原则。

@@ -48,6 +48,7 @@
 | --- | --- |
 | 在终端填写账号、开始和结束连接 | [命令行快速开始](docs/getting-started.md) |
 | 下载或替换程序 | [下载选择](docs/download.md) |
+| 检查新版本、更新程序 | [更新方法](docs/update.md) |
 | 连接失败、经常掉线、找不到网卡 | [连接与排障](docs/troubleshooting.md) |
 | 调整日志、重连时间或其他设置 | [配置参考](docs/configuration.md) |
 | 反馈问题 | [核心问题反馈](https://github.com/SeaLoong/drcom4scut/issues) · [图形界面问题反馈](https://github.com/SeaLoong/drcom4scutGUI/issues) |

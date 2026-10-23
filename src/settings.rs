@@ -37,6 +37,10 @@ pub fn command() -> clap::Command {
             arg!(--"list-interfaces" "List interfaces without opening capture or requiring credentials.").action(ArgAction::SetTrue),
             arg!(--doctor "Inspect interface and capture prerequisites without authentication.").action(ArgAction::SetTrue),
             arg!(--"init-config" "Create a configuration template without authentication.").action(ArgAction::SetTrue),
+            arg!(--update "Download and install the latest formal core release, if newer.").action(ArgAction::SetTrue).conflicts_with("check-update"),
+            arg!(--"check-update" "Check the latest formal core release without authentication.").action(ArgAction::SetTrue),
+            arg!(--"no-update-check" "Disable automatic core update checks for this run.").action(ArgAction::SetTrue),
+            arg!(--"update-proxy" <URL> "HTTPS GitHub proxy prefix (default https://gh-proxy.com/)."),
             arg!(--"no-udp" "Use EAP-only authentication.").action(ArgAction::SetTrue).conflicts_with("with-udp"),
             arg!(--"with-udp" "Use full EAP and UDP, overriding no_udp in config.").action(ArgAction::SetTrue),
             arg!(--"no-log" "Disable file logs.").action(ArgAction::SetTrue),
@@ -109,8 +113,56 @@ pub enum Mode {
     Portal,
 }
 
+#[derive(Debug, Hash, PartialEq, Eq, Clone)]
+pub struct UpdateSettings {
+    pub enabled: bool,
+    pub proxy: String,
+    pub interval_hours: u64,
+}
+
+impl Default for UpdateSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            proxy: crate::update::UpdateOptions::default().proxy,
+            interval_hours: 24,
+        }
+    }
+}
+
+impl UpdateSettings {
+    fn resolve(matches: &ArgMatches, cfg: &Config) -> Result<Self, String> {
+        if let Ok(value) = cfg.get::<config::Value>("update")
+            && value.kind != ValueKind::Nil
+            && !matches!(value.kind, ValueKind::Table(_))
+        {
+            return Err("Invalid update: expected a mapping".into());
+        }
+        let defaults = Self::default();
+        let proxy =
+            text_from(matches, cfg, "update-proxy", "update.proxy")?.unwrap_or(defaults.proxy);
+        crate::update::validate_proxy(&proxy).map_err(|error| error.to_string())?;
+        let interval_hours = integer(cfg, "update.interval_hours", 24, 1)?;
+        if interval_hours > 8760 {
+            return Err("Invalid update.interval_hours: expected integer in 1..=8760".into());
+        }
+        Ok(Self {
+            enabled: !matches.get_flag("no-update-check") && boolean(cfg, "update.enabled", true)?,
+            proxy,
+            interval_hours: interval_hours as u64,
+        })
+    }
+
+    pub fn options(&self) -> crate::update::UpdateOptions {
+        crate::update::UpdateOptions {
+            proxy: self.proxy.clone(),
+        }
+    }
+}
+
 #[derive(Hash, PartialEq, Eq, Clone)]
 pub struct Settings {
+    pub update: UpdateSettings,
     pub control_pipe: Option<String>,
     pub control_socket: Option<PathBuf>,
     pub hooks: crate::hooks::Hooks,
@@ -155,6 +207,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Settings {
+            update: UpdateSettings::default(),
             control_pipe: None,
             control_socket: None,
             hooks: crate::hooks::Hooks::default(),
@@ -413,6 +466,10 @@ impl Settings {
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
             Err(_) => return Err("Cannot create configuration file".to_owned()),
         }
+        Self::read_config_file(path)
+    }
+
+    fn read_config_file(path: &Path) -> Result<Config, String> {
         // Inspect the opened handle as well as the path. O_NONBLOCK prevents a
         // path replaced by a FIFO from hanging startup between stat and open.
         // Symlinks to ordinary files remain supported for managed deployments.
@@ -459,6 +516,22 @@ impl Settings {
             .map_err(|_| "Cannot read configuration: expected valid YAML".to_owned())
     }
 
+    /// Update actions inspect only update options. They never create a template,
+    /// read credentials, initialize logging or validate authentication settings.
+    pub fn update_from_matches(matches: &ArgMatches) -> Result<UpdateSettings, String> {
+        let path = Path::new(
+            matches
+                .get_one::<String>("config")
+                .ok_or("Missing config path")?,
+        );
+        let cfg = match std::fs::metadata(path) {
+            Ok(_) => Self::read_config_file(path)?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Config::default(),
+            Err(_) => return Err("Cannot inspect configuration file".into()),
+        };
+        UpdateSettings::resolve(matches, &cfg)
+    }
+
     fn resolve(matches: &ArgMatches, cfg: &Config) -> Result<Self, String> {
         for key in [
             "heartbeat",
@@ -478,6 +551,7 @@ impl Settings {
             }
         }
         let mut settings = Self {
+            update: UpdateSettings::resolve(matches, cfg)?,
             debug: matches.get_flag("debug"),
             check_config: matches.get_flag("check-config"),
             ..Self::default()
@@ -981,6 +1055,55 @@ mod tests {
 
     fn credentials(extra: &str) -> String {
         format!("username: student\npassword: test-password\nhostname: test-pc\n{extra}")
+    }
+
+    #[test]
+    fn update_defaults_overrides_and_opt_out_are_validated() {
+        let settings = parse(&credentials(""), &[]).unwrap();
+        assert_eq!(settings.update, UpdateSettings::default());
+        let settings = parse(
+            &credentials("update: {enabled: false, proxy: 'https://mirror.example/prefix/', interval_hours: 48}"),
+            &["--update-proxy", "https://override.example/"],
+        )
+        .unwrap();
+        assert!(!settings.update.enabled);
+        assert_eq!(settings.update.proxy, "https://override.example/");
+        assert_eq!(settings.update.interval_hours, 48);
+        let settings = parse(&credentials(""), &["--no-update-check"]).unwrap();
+        assert!(!settings.update.enabled);
+        for update in [
+            "false",
+            "{enabled: 'true'}",
+            "{proxy: 42}",
+            "{proxy: 'http://mirror.example/'}",
+            "{interval_hours: 0}",
+            "{interval_hours: -1}",
+            "{interval_hours: 8761}",
+            "{interval_hours: '24'}",
+            "{interval_hours: true}",
+        ] {
+            assert!(
+                parse(&credentials(&format!("update: {update}")), &[]).is_err(),
+                "{update}"
+            );
+        }
+    }
+
+    #[test]
+    fn standalone_update_options_ignore_authentication_configuration_and_password_input() {
+        let cfg = Config::builder()
+            .add_source(config::File::from_str(
+                "username: 42\npassword_file: /not/a/password\nmode: invalid\nportal: false\nupdate: {interval_hours: 72}",
+                FileFormat::Yaml,
+            ))
+            .build()
+            .unwrap();
+        let matches = command()
+            .try_get_matches_from(["drcom4scut", "--update", "--password-stdin"])
+            .unwrap();
+        let settings = UpdateSettings::resolve(&matches, &cfg).unwrap();
+        assert_eq!(settings.interval_hours, 72);
+        assert_eq!(settings.proxy, "https://gh-proxy.com/");
     }
 
     #[test]

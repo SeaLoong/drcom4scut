@@ -104,3 +104,17 @@ test('mobile documentation keeps navigation when JavaScript is disabled', async 
   await expect(page.locator('h1')).toHaveText('帮助中心');
   await context.close();
 });
+
+test('update help connects desktop instructions with the core commands', async ({ page }) => {
+  await page.goto('help');
+  await page.getByRole('link', { name: '在窗口中更新图形界面或核心', exact: true }).click();
+  await expect(page).toHaveURL(/\/gui\/update$/);
+  await expect(page.locator('.vp-doc')).toContainText('检查核心更新');
+  await page.getByRole('link', { name: '核心更新命令与自动提醒设置', exact: true }).click();
+  await expect(page).toHaveURL(/\/guide\/update$/);
+  await expect(page.locator('.vp-doc')).toContainText('--check-update');
+  await expect(page.locator('.vp-doc')).toContainText('--no-update-check');
+  await page.getByRole('link', { name: '更新设置', exact: true }).click();
+  await expect.poll(() => decodeURI(page.url())).toMatch(/\/guide\/configuration#更新设置$/);
+  await expect(page.locator('[id="更新设置"]')).toBeVisible();
+});

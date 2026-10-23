@@ -8,6 +8,7 @@ import { withBase } from 'vitepress';
       <a :href="withBase('/guide/download')">下载</a>
       <a :href="withBase('/help')">完整帮助目录</a>
       <a :href="withBase('/screenshots')">运行截图</a>
+      <a :href="withBase('/guide/update')">更新程序</a>
       <a :href="withBase('/guide/troubleshooting')">连接排障</a>
     </nav>
   </noscript>

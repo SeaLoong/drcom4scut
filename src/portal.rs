@@ -165,6 +165,10 @@ impl PortalClient {
                 .map_err(|_| PortalError::InvalidConfig)?;
             api
         };
+        // The updater supplies HTTPS in every feature set with ring, including
+        // static router builds. Reqwest's no-provider mode needs that provider
+        // installed before building a client with its platform certificate store.
+        let _ = rustls::crypto::ring::default_provider().install_default();
         let mut builder = Client::builder()
             .local_address(config.local_ip)
             .redirect(Policy::none())

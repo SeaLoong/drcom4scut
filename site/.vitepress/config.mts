@@ -33,6 +33,7 @@ export default defineConfig({
         { text: '实际运行截图', link: '/screenshots' },
         { text: '电脑图形界面', link: '/desktop' },
         { text: '命令行快速开始', link: '/guide/getting-started' },
+        { text: '更新程序', link: '/guide/update' },
         { text: '连接与排障', link: '/guide/troubleshooting' },
       ] },
       { text: '安装与连接', items: [
@@ -40,6 +41,7 @@ export default defineConfig({
         { text: 'Mac 图形界面', link: '/gui/macos' },
         { text: 'Linux 图形界面', link: '/gui/linux' },
         { text: '图形界面日常操作', link: '/gui/usage' },
+        { text: '图形界面更新', link: '/gui/update' },
         { text: 'Windows 命令行', link: '/guide/windows' },
         { text: 'Linux 命令行', link: '/guide/linux' },
         { text: 'Mac 命令行', link: '/guide/macos' },

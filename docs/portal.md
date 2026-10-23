@@ -90,7 +90,7 @@ Windows PowerShell 使用 `.\drcom4scut.exe --config portal.yml --logoff`。这�
 
 优先使用学校提供的 **HTTPS** 地址。学校只提供 `http://` 入口时，在确认地址后将 `portal.allow_http` 设为 `true`；图形界面中勾选 **“登录页使用 HTTP（明文传输）”**。HTTP 会以明文传输账号密码，这个选择由你明确启用，客户端保持所选协议。
 
-Windows、macOS 和 Linux 桌面一体包支持 HTTPS 并检查网站证书。OpenWrt 路由器包提供 HTTP 网页登录；需要 HTTPS 的路由器用户可按[开发说明](development.md#构建特性)构建带 `portal-tls` 的版本。
+Windows、macOS、Linux 桌面一体包和 OpenWrt 路由器包均支持 HTTPS 并检查网站证书。OpenWrt 通常通过系统的 `ca-bundle` 提供可信证书，按固件的软件包管理方式安装或更新即可。
 
 ## 在 OpenWrt 后台使用
 
@@ -114,7 +114,7 @@ uci commit drcom4scut
 | 连接 Wi-Fi 后没有登录页 | 在浏览器打开学校公布的入口，检查无线网络设置 |
 | 页面要求验证码、短信或扫码 | 使用学校网页登录 |
 | `HTTP portal requires explicit...` | 当前地址为 HTTP；确认学校入口后启用 HTTP 选项 |
-| `HTTPS portal requires...portal-tls` | 换用支持 HTTPS 的桌面包，或构建带 `portal-tls` 的程序 |
+| HTTPS 证书检查失败 | 核对系统时间和学校入口地址，更新系统可信证书；OpenWrt 检查 `ca-bundle` |
 | `Portal AC address was not discovered` | 核对登录入口；有学校提供的接入设备地址时填入 `portal.ac_ip` |
 | `Portal did not report a usable client IPv4` | 核对无线连接；已确认学校看到的设备地址时填入 `portal.client_ip` |
 | `Portal redirect was rejected` | 学校页面跳到了另一个主机，确认新的入口后更新设置 |

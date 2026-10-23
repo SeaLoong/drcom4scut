@@ -15,6 +15,12 @@ gateway:
 dns2:
 status_file:
 reconnect_max: 300
+# Automatic checks notify only; install explicitly with drcom4scut --update.
+# The first check runs 60 seconds after the first complete online connection.
+update:
+  enabled: true
+  proxy: https://gh-proxy.com/
+  interval_hours: 24
 hooks:
   online: []
   offline: []

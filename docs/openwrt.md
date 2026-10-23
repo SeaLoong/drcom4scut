@@ -20,7 +20,7 @@ uname -m
 opkg print-architecture
 ```
 
-这些命令显示设备型号、处理器类型和系统支持的软件包类型。使用 `apk` 管理软件的固件，将最后一条换成 `apk --print-arch`。按输出和设备规格确认后，从[下载页](https://github.com/SeaLoong/drcom4scut/releases)选择以下 `.tar.gz` 包；当前这些包在标有 **Pre-release** 的开发预览中，文件名包含 `0.5.1`。
+这些命令显示设备型号、处理器类型和系统支持的软件包类型。使用 `apk` 管理软件的固件，将最后一条换成 `apk --print-arch`。按输出和设备规格确认后，从[下载页](https://github.com/SeaLoong/drcom4scut/releases)的最新正式版选择以下 `.tar.gz` 包，文件名中包含对应版本号。
 
 | 文件名中的这段文字 | 适用设备 |
 | --- | --- |
@@ -157,7 +157,7 @@ sh openwrt/install-luci.sh
 
 ## 无线门户、维护与排障
 
-使用校园 Wi-Fi 时，先在路由器网络设置中连接无线网络，再按[校园网页登录指南](portal.md)配置自动登录。路由器包提供 HTTP 网页认证；学校使用 HTTPS 入口时，可按[构建说明](development.md#构建特性)准备支持 HTTPS 的版本。
+使用校园 Wi-Fi 时，先在路由器网络设置中连接无线网络，再按[校园网页登录指南](portal.md)配置自动登录。路由器包支持 HTTPS 入口并检查网站证书，通常由系统的 `ca-bundle` 提供可信证书。
 
 替换程序前先停止服务，备份 `/etc/drcom4scut/` 和服务设置，再从新包目录执行安装器。确认账号、程序版本和文件权限后重新启动。默认示例不持续写文件日志，以减少路由器存储写入；日常查看 `logread -e drcom4scut` 即可。
 

@@ -43,7 +43,7 @@ macOS 使用 Xcode Command Line Tools 提供的系统 SDK 和链接器；抓包�
 | --- | --- | --- |
 | 默认 | 无附加参数 | 文件日志、有线 EAP/UDP、HTTP 与 HTTPS Portal |
 | 精简 | `--no-default-features` | 有线 EAP/UDP、控制台日志 |
-| 路由器 | `--no-default-features --features log4rs,portal` | 文件日志、有线认证、显式允许的 HTTP Portal |
+| 路由器 | `--no-default-features --features log4rs,portal-tls` | 文件日志、有线认证、HTTP 与 HTTPS Portal |
 | HTTPS 门户 | `--features portal-tls` | 启用 `portal` 及证书校验；交叉编译需匹配的 TLS C/汇编工具链 |
 
 HTTP 是未加密的网页请求，HTTPS 使用 TLS 加密并检查网站证书。HTTPS 入口需要启用 `portal-tls`，以保持加密传输和证书检查。`log4rs` 只启用实际使用的日志 appender/编码/滚动功能，不需要其 YAML 配置解析器。
@@ -57,6 +57,7 @@ HTTP 是未加密的网页请求，HTTPS 使用 TLS 加密并检查网站证书�
 - `device` 隔离抓包接口。Unix 将 pnet 阻塞收发放在有限超时的适配层；macOS BPF 使用非阻塞描述符和有界等待，取消中的读取保留复用。Windows 使用非阻塞 pcap，并通过原生 IP Helper 枚举网卡，使列举与 Portal 不依赖捕获驱动。
 - `socket` 为 DNS/UDP 选择真实本地 IPv4 和出口接口，macOS 使用 `IP_BOUND_IF` 约束出口。载荷里的 `eap_ip` / `udp_ip` 与实际源地址分离。未固定 `ip` 的会话周期检查地址变化。
 - `portal` 处理显式选择的 ePortal 接入、同主机约束、响应解析和在线会话确认。`control` 提供 Windows 私有命名管道和 Unix 私有 socket 的 GUI 停止通道，停止请求与父进程 EOF 均进入有界清理；`service` 仅对接 Windows SCM。
+- `update` 检查最新正式版、校验下载并替换当前核心；`update_schedule` 为整个连接生命周期保留一次自动检查计时，重连沿用原来的计时。
 
 有线 `legacy` 与 `windows31` 共用 EAP Start、Identity、MD5、Success 的基本过程；后者改变部分扩展字段和 MiscInfo，并增加一次 UDP 启动心跳确认。Identity 扩展仍相同，周期心跳相同。报文参数与依据分别见[配置参考](configuration.md#有线报文兼容选项)及[客户端参考](references-clients.md)。
 
@@ -71,6 +72,7 @@ HTTP 是未加密的网页请求，HTTPS 使用 TLS 加密并检查网站证书�
 | DNS/UDP | 真实 socket、源绑定、启动/周期心跳、丢包、EAP 状态变化 | 本机 loopback |
 | Portal | HTTP/TLS、JSONP、会话归属、地址/跳转约束、超时与注销 | 本机模拟服务器 |
 | CLI/生命周期 | 真实子进程、私有密码输入、状态、hooks、信号退出 | 普通用户 |
+| 更新 | 正式版选择、代理路径、归档与架构校验、实际运行文件替换及回滚、连接后的计时 | 本机模拟服务器、临时程序副本及虚拟时钟 |
 | Windows 策略 | 服务 ACL、所有者、父路径、外部密码源、无驱动枚举 | Windows runner |
 | macOS / Unix | 原生接口绑定与 loopback、私有 socket、停止与父进程 EOF | 原生 macOS / Linux runner |
 | OpenWrt | procd/UCI、私有路径、LuCI JS/RPC、安装、ABI 与归档 | Shell、Python、Node fixtures |
@@ -103,12 +105,12 @@ powershell -NoProfile -NonInteractive -File scripts/test-service-acl.ps1
 rustup target add armv7-unknown-linux-musleabi
 RUSTFLAGS='-C linker=rust-lld -C target-feature=+crt-static' \
   cargo build --locked --release --target armv7-unknown-linux-musleabi \
-    --no-default-features --features log4rs,portal
+    --no-default-features --features log4rs,portal-tls
 DRCOM_TEST_RUNNER=qemu-arm \
 CARGO_TARGET_ARMV7_UNKNOWN_LINUX_MUSLEABI_RUNNER=qemu-arm \
 RUSTFLAGS='-C linker=rust-lld -C target-feature=+crt-static' \
   cargo test --locked --target armv7-unknown-linux-musleabi \
-    --no-default-features --features log4rs,portal
+    --no-default-features --features log4rs,portal-tls
 python3 .github/scripts/package_release.py armv7-unknown-linux-musleabi --runner qemu-arm
 ```
 
@@ -153,12 +155,20 @@ Preview 是给使用者试用最新代码的开发预览，正式版 Release 仍
 ## 手动发布
 
 1. 更新 `Cargo.toml`、相关打包元数据和 [CHANGELOG](../CHANGELOG.md)，提交源码及锁文件，确认普通 CI 结果。
-2. 在 GitHub 打开 **Actions → Manual release → Run workflow**，选择待发布的分支，填写与 `Cargo.toml` 版本一致的标签，如 `v0.5.1`。
+2. 在 GitHub 打开 **Actions → Manual release → Run workflow**，选择待发布的分支，填写与 `Cargo.toml` 版本一致的标签，如 `v0.6.0`。
 3. `draft` 默认开启。保留它会创建草稿；取消后会直接发布。
 
 工作流重新执行共用验证、按上文相同规则选择另一仓库的最新公开版本，生成并检查六种桌面一体包及其余平台包与校验和，核对最终标签仍指向已验证提交，然后上传到草稿。全部远端文件核验完成后，按 `draft` 选项保留草稿或公开发布。它拒绝覆盖其他提交的标签及既有 Release。只有最终发布 job 有写权限。正式发布仅接受手动触发，普通 Git 推送只会按上述条件自动创建 Preview。
 
 来源快照、许可证和协议证据见[派生仓库记录](references-forks.md)与[相关客户端记录](references-clients.md)。新增兼容行为应附独立报文样本或可重复的协议测试，并明确实机验证范围。
+
+## 程序内更新
+
+用户操作见[更新指南](update.md)。核心直接选择当前构建目标的最新正式版，手动检查和安装只读取更新配置，不要求认证配置或校园密码，也不生成配置模板。检查信息、归档及 `SHA256SUMS` 共用指定的 HTTPS 代理，默认 `https://gh-proxy.com/`；精简和路由器构建也包含更新所需的 HTTPS 支持。
+
+安装前核对发布文件摘要、校验清单、构建来源和二进制系统架构，拒绝越界路径、链接和特殊文件，只取出当前核心可执行文件。安装在同目录暂存并替换，保留 Unix 模式、所有者及 Linux capabilities；失败时还原原文件。摘要和校验清单用于核对数据一致性，目前没有独立发布签名，更新代理属于信任范围。
+
+自动检查在所选连接模式完整在线后开始计时，使用 GUI 私有控制通道时由 GUI 统一管理。测试覆盖本地模拟下载、错误校验值、恶意归档、实际运行文件的替换与回滚，以及重连、仅 EAP 和 Portal 的计时；平台工作流另用本次原生发布归档验证安装。模拟更新测试不证明校园认证或目标设备的授权行为。
 
 ## 软件首页与帮助中心
 
@@ -179,6 +189,6 @@ npm run test:browser
 npm run preview
 ```
 
-图形界面放在其他目录时，用 `GUI_DOCS_DIR=/完整路径/drcom4scutGUI` 指定。构建结果为 `site/.vitepress/dist`；构建自动检查文档转换、生成页面的本地链接、图片和标题锚点。浏览器检查覆盖搜索、慢加载入口、手机导航、主题切换、深链接和截图展示，Pages 发布前也会执行。本地搜索随静态页面发布，用户输入的搜索词留在浏览器。
+图形界面放在其他目录时，用 `GUI_DOCS_DIR=/完整路径/drcom4scutGUI` 指定。构建结果为 `site/.vitepress/dist`；构建自动检查文档转换、生成页面的本地链接、图片和标题锚点。浏览器检查覆盖搜索、慢加载入口、手机导航、主题切换、深链接、更新帮助入口和截图展示，Pages 发布前也会执行。本地搜索随静态页面发布，用户输入的搜索词留在浏览器。
 
 VitePress 当前稳定版搭配固定的 Vite 6.4.5 安全修复版本，锁文件保存确切依赖。维护时执行 `npm audit --prefix site`，并同时验证构建、导航和搜索。[Website and help](https://github.com/SeaLoong/drcom4scut/actions/workflows/pages.yml) 在推送时构建页面，PR 只检查构建；master 或手动运行可部署。[Dependency audit](https://github.com/SeaLoong/drcom4scut/actions/workflows/dependency-audit.yml) 每周检查已锁定依赖；正式发布软件仍使用前述手动流程。
