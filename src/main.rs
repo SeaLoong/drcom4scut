@@ -45,8 +45,15 @@ fn dispatch() -> Result<(), String> {
         }
     }
     if matches.get_flag("list-interfaces") {
-        println!("NAME\tMAC\tUP\tIPv4");
-        for interface in device::get_all_interfaces() {
+        let interfaces = device::get_all_interfaces();
+        let name_width = interfaces
+            .iter()
+            .map(|interface| interface.name.chars().count())
+            .max()
+            .unwrap_or(0)
+            .max("NAME".len());
+        println!("{:<name_width$}  {:<17}  {:<5}  IPv4", "NAME", "MAC", "UP");
+        for interface in interfaces {
             let ips = interface
                 .ips
                 .iter()
@@ -55,7 +62,7 @@ fn dispatch() -> Result<(), String> {
                 .collect::<Vec<_>>()
                 .join(",");
             println!(
-                "{}\t{}\t{}\t{}",
+                "{:<name_width$}  {:<17}  {:<5}  {}",
                 interface.name,
                 interface.mac.map(|mac| mac.to_string()).unwrap_or_default(),
                 interface.is_up(),
