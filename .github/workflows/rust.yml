@@ -24,9 +24,14 @@ jobs:
   validate:
     uses: ./.github/workflows/validate-build.yml
 
+  bundles:
+    needs: validate
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master' && github.repository == 'SeaLoong/drcom4scut'
+    uses: ./.github/workflows/bundle-desktop.yml
+
   preview:
     name: Publish preview
-    needs: validate
+    needs: [validate, bundles]
     if: github.event_name == 'push' && github.ref == 'refs/heads/master' && github.repository == 'SeaLoong/drcom4scut'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -47,6 +52,13 @@ jobs:
           merge-multiple: true
       - name: Verify the complete shared platform matrix and checksums
         run: python3 .github/scripts/verify_release.py
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: desktop-bundle-*
+          path: dist
+          merge-multiple: true
+      - name: Verify all six native desktop bundles and combined checksums
+        run: python3 .github/scripts/bundle_desktop.py aggregate
       - name: Publish verified development preview
         env:
           GH_TOKEN: ${{ github.token }}

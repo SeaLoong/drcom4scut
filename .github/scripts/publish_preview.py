@@ -236,7 +236,7 @@ def publish_preview(environment, directory, releases=None):
         print("Skipping preview: master moved or an identical/newer CI run was published")
         return False
     releases.verify_tag_target(tag, sha)
-    notes = (release_notes.render(repository, sha, tag, preview=True) + "\n"
+    notes = (release_notes.render(repository, sha, tag, bundles=release_notes.load_index(directory, assets), preview=True) + "\n"
              + f"[Build and tests](https://github.com/{repository}/actions/runs/{run_id})\n\n"
              f"{marker(repository, number, attempt, sha)}\n")
     releases.create(tag, sha, notes)

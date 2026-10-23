@@ -47,7 +47,7 @@ def publish_manual(environment, directory, releases=None):
     prerelease = "-" in tag
     releases = ManualReleases(repository, prerelease) if releases is None else releases
     releases.verify_tag_target(tag, sha, required=True)
-    notes = preview.release_notes.render(repository, sha, tag, preview=prerelease)
+    notes = preview.release_notes.render(repository, sha, tag, bundles=preview.release_notes.load_index(directory, assets), preview=prerelease)
     releases.create(tag, sha, notes)
     for path in assets:
         releases.upload(tag, path)

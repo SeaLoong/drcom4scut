@@ -1,0 +1,105 @@
+name: Bundle and test desktop downloads
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: '1'
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+
+jobs:
+  counterpart:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Pin the newest published counterpart, including previews
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 .github/scripts/bundle_desktop.py resolve --output counterpart.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: desktop-counterpart-lock
+          path: counterpart.json
+          if-no-files-found: error
+          retention-days: 14
+
+  bundle:
+    needs: counterpart
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runtime: win-x64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive: zip
+          - runtime: win-arm64
+            os: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            archive: zip
+          - runtime: linux-x64
+            os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            archive: tar.gz
+          - runtime: linux-arm64
+            os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            archive: tar.gz
+          - runtime: osx-x64
+            os: macos-15-intel
+            target: x86_64-apple-darwin
+            archive: tar.gz
+          - runtime: osx-arm64
+            os: macos-15
+            target: aarch64-apple-darwin
+            archive: tar.gz
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.14'
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          dotnet-version: 10.0.x
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: desktop-counterpart-lock
+          path: counterpart
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ github.repository == 'SeaLoong/drcom4scut' && format('package-{0}', matrix.target) || format('gui-package-{0}', matrix.runtime) }}
+          path: own-dist
+      - name: Assemble the verified GUI and core into one folder
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: python .github/scripts/bundle_desktop.py build --runtime ${{ matrix.runtime }} --lock counterpart/counterpart.json
+      - name: Install Linux display dependencies for the actual bundled GUI
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y xvfb xauth libice6 libsm6 libfontconfig1 libx11-6 libxcb1 libxrandr2 libxi6 libxcursor1 libxrender1 libgl1 libgtk-3-0t64 fonts-dejavu-core fonts-noto-cjk
+      - name: Verify native GUI discovery and launch on Linux
+        if: runner.os == 'Linux'
+        shell: bash
+        run: xvfb-run --auto-servernum python .github/scripts/bundle_desktop.py smoke --runtime ${{ matrix.runtime }} --archive bundles/*.${{ matrix.archive }}
+      - name: Verify native GUI discovery and launch on Windows or macOS
+        if: runner.os != 'Linux'
+        shell: bash
+        run: python .github/scripts/bundle_desktop.py smoke --runtime ${{ matrix.runtime }} --archive bundles/*.${{ matrix.archive }}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: desktop-bundle-${{ matrix.runtime }}
+          path: bundles/*
+          if-no-files-found: error
+          retention-days: 14

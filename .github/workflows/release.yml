@@ -46,10 +46,14 @@ jobs:
     needs: version
     uses: ./.github/workflows/validate-build.yml
 
+  bundles:
+    needs: validate
+    uses: ./.github/workflows/bundle-desktop.yml
+
   release:
-    needs: [version, validate]
+    needs: [version, validate, bundles]
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 20
     permissions:
       contents: write
     steps:
@@ -61,6 +65,13 @@ jobs:
           merge-multiple: true
       - name: Verify the complete shared platform matrix and checksums
         run: python3 .github/scripts/verify_release.py
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: desktop-bundle-*
+          path: dist
+          merge-multiple: true
+      - name: Verify all six native desktop bundles and combined checksums
+        run: python3 .github/scripts/bundle_desktop.py aggregate
       - name: Create release from the validated commit
         env:
           GH_TOKEN: ${{ github.token }}

@@ -4,6 +4,9 @@ import importlib.util
 import json
 from pathlib import Path
 import tempfile
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from release_fixtures import add_bundles
 import unittest
 from unittest.mock import patch
 
@@ -53,6 +56,7 @@ class ManualReleaseTests(unittest.TestCase):
         archive = self.dist / "checked-package.zip"
         archive.write_bytes(b"validated archive")
         (self.dist / "SHA256SUMS").write_text(f"{hashlib.sha256(archive.read_bytes()).hexdigest()}  {archive.name}\n")
+        self.bundles = add_bundles(self.dist, REPOSITORY, HERE.parents[1])
         self.environment = {
             "GITHUB_REPOSITORY": REPOSITORY, "GITHUB_SHA": SHA,
             "GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_SERVER_URL": "https://github.com",
@@ -63,7 +67,7 @@ class ManualReleaseTests(unittest.TestCase):
         api = FakeReleases()
         manual.publish_manual(self.environment, self.dist, api)
         self.assertTrue(api.public)
-        self.assertEqual(len(api.record["assets"]), 2)
+        self.assertEqual(len(api.record["assets"]), 8)
         self.assertIn("开始使用", api.notes)
 
     def test_requested_draft_and_interrupted_or_corrupt_uploads_stay_private(self):
@@ -82,6 +86,22 @@ class ManualReleaseTests(unittest.TestCase):
                 manual.publish_manual(dict(self.environment, **fields), self.dist, api)
             self.assertIsNone(api.record)
 
+    def test_missing_incomplete_or_mismatched_bundle_index_never_creates_a_release(self):
+        path = self.dist / "BUNDLE-INDEX.json"
+        original = path.read_text()
+        for change in ("missing", "runtime", "digest", "filename"):
+            index = json.loads(original)
+            if change == "runtime": index.pop("linux-arm64")
+            elif change == "digest": index["win-x64"]["sha256"] = "0" * 64
+            elif change == "filename": index["win-x64"]["filename"] = "unverified.zip"
+            path.write_text(json.dumps(index))
+            if change == "missing": path.unlink()
+            api = FakeReleases()
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                manual.publish_manual(self.environment, self.dist, api)
+            self.assertIsNone(api.record)
+            self.assertFalse(api.public)
+
     def test_manual_prerelease_never_becomes_latest(self):
         api = manual.ManualReleases(REPOSITORY, True)
         with patch.object(api, "_run") as run:
@@ -90,11 +110,15 @@ class ManualReleaseTests(unittest.TestCase):
         self.assertIn("--prerelease=true", run.call_args.args)
 
     def test_notes_link_to_every_platform_and_commit_pinned_help(self):
-        notes = manual.preview.release_notes.render(REPOSITORY, SHA, "v1.2.3")
-        platforms = json.loads((HERE / "platforms.json").read_text())
-        for platform in platforms:
-            target = platform.get("runtime", platform.get("target"))
-            self.assertIn(target, notes)
+        notes = manual.preview.release_notes.render(REPOSITORY, SHA, "v1.2.3", bundles=self.bundles)
+        for item in self.bundles.values():
+            self.assertIn(item["filename"], notes)
+        if not REPOSITORY.endswith("GUI"):
+            for platform in json.loads((HERE / "platforms.json").read_text()):
+                if platform["openwrt"]:
+                    self.assertIn(platform["target"], notes)
+                else:
+                    self.assertNotIn(platform["target"], notes)
         self.assertIn(f"/blob/{SHA}/", notes)
         self.assertIn("SHA256SUMS", notes)
 

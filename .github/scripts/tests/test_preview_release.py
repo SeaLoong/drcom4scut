@@ -6,6 +6,9 @@ import importlib.util
 from pathlib import Path
 import subprocess
 import tempfile
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from release_fixtures import add_bundles
 import unittest
 from unittest.mock import patch
 
@@ -131,6 +134,7 @@ class PreviewTests(unittest.TestCase):
         self.archive.write_bytes(b"checked build archive")
         self.sums = self.dist / "SHA256SUMS"
         self.sums.write_text(f"{preview.digest(self.archive)}  {self.archive.name}\n")
+        self.bundles = add_bundles(self.dist, REPOSITORY, SCRIPT.parents[2])
         self.releases = FakeReleases()
 
     def run_preview(self, **changes):
@@ -144,7 +148,7 @@ class PreviewTests(unittest.TestCase):
         self.assertEqual(release["target_commitish"], SHA)
         self.assertTrue(release["prerelease"])
         self.assertFalse(release["draft"])
-        self.assertEqual({item["name"] for item in release["assets"]}, {self.archive.name, "SHA256SUMS"})
+        self.assertEqual({item["name"] for item in release["assets"]}, {self.archive.name, "SHA256SUMS"} | {item["filename"] for item in self.bundles.values()})
         events = self.releases.events
         self.assertLess(events.index("create"), events.index("upload:" + self.archive.name))
         self.assertLess(events.index("upload:SHA256SUMS"), events.index("draft"))
