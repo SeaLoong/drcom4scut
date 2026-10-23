@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createUrlRewriter, transformMarkdown } from './document-links.mjs';
 
 const site = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const core = path.dirname(site);
@@ -20,46 +21,82 @@ const entries = [
   ['gui','THIRD-PARTY-NOTICES.md','gui/notices.md'],
   ['gui','SECURITY.md','gui/security-policy.md'],
 ];
-for (const name of (await fs.readdir(path.join(core, 'docs'))).filter(x => x.endsWith('.md'))) entries.push(['core',`docs/${name}`,`guide/${name}`]);
-for (const name of (await fs.readdir(path.join(gui, 'docs'))).filter(x => x.endsWith('.md'))) entries.push(['gui',`docs/${name}`,`gui/${name}`]);
+for (const name of (await fs.readdir(path.join(core, 'docs'))).filter(x => x.endsWith('.md')).sort()) entries.push(['core',`docs/${name}`,`guide/${name}`]);
+for (const name of (await fs.readdir(path.join(gui, 'docs'))).filter(x => x.endsWith('.md')).sort()) entries.push(['gui',`docs/${name}`,`gui/${name}`]);
 const mapped = new Map(entries.map(([kind, file, target]) => [`${kind}/${file}`,`/${target.replace(/\.md$/, '')}`]));
 await fs.rm(out, { recursive: true, force: true });
 await fs.mkdir(out, { recursive: true });
 
-function rewriteUrl(url, kind, file) {
-  if (url.startsWith('#') || url.startsWith('mailto:')) return url;
-  if (url.startsWith('https://SeaLoong.github.io/drcom4scut/') || url.startsWith('https://sealoong.github.io/drcom4scut/')) return '/';
-  const github = url.match(/^https:\/\/github\.com\/SeaLoong\/(drcom4scutGUI|drcom4scut)(?:\/(?:blob|tree)\/(?:master|[a-f0-9]{40})\/(.*?))?(#[^?]*)?$/);
-  if (github) {
-    const other = github[1] === 'drcom4scutGUI' ? 'gui' : 'core';
-    const source = github[2] || 'README.md';
-    const target = mapped.get(`${other}/${source}`);
-    if (target) return target + (github[3] && github[3] !== '#readme' ? github[3] : '');
+const assets = new Map();
+const copiedAssets = [];
+async function collectAssets(kind, relative, webRoot) {
+  const directory = path.join(roots[kind], relative);
+  let files;
+  try { files = await fs.readdir(directory, { withFileTypes: true }); }
+  catch (error) { if (error.code === 'ENOENT') return; throw error; }
+  for (const file of files.sort((a, b) => a.name.localeCompare(b.name))) {
+    const source = path.posix.join(relative, file.name);
+    const target = webRoot + '/' + file.name;
+    if (file.isDirectory()) await collectAssets(kind, source, target);
+    else if (file.isFile() && /\.(?:png|jpe?g|webp|gif|svg)$/i.test(file.name)) {
+      assets.set(`${kind}/${source}`, target.split('/').map(encodeURIComponent).join('/'));
+      copiedAssets.push([path.join(roots[kind], source), target]);
+    } else if (file.isSymbolicLink()) throw new Error(`Document assets must be regular files: ${source}`);
   }
-  if (/^(?:[a-z]+:|\/)/i.test(url)) return url;
-  const [raw, anchor = ''] = url.split('#');
-  const resolved = path.posix.normalize(path.posix.join(path.posix.dirname(file), raw));
-  const target = mapped.get(`${kind}/${resolved}`);
-  if (target) return target + (anchor ? '#' + anchor : '');
-  if (resolved.startsWith('docs/badges/')) return `/badges/${kind}/${path.posix.basename(resolved)}`;
-  return `https://github.com/SeaLoong/${kind === 'gui' ? 'drcom4scutGUI' : 'drcom4scut'}/blob/${kind === 'gui' ? sources.gui.ref : 'master'}/${resolved}${anchor ? '#' + anchor : ''}`;
 }
+for (const kind of ['core', 'gui']) {
+  await collectAssets(kind, 'docs/badges', `/badges/${kind}`);
+  await collectAssets(kind, 'docs/images', `/images/${kind}`);
+}
+const rewriteUrl = createUrlRewriter({ documents: mapped, assets, guiRef: sources.gui.ref });
 
 for (const [kind, file, target] of entries) {
-  let text = await fs.readFile(path.join(roots[kind], file), 'utf8');
-  // Transform only Markdown links outside fenced code; examples remain byte-for-byte.
-  let fence = null;
-  text = text.split('\n').map(line => {
-    const marker = line.match(/^\s*(`{3,}|~{3,})/);
-    if (marker) { if (!fence) fence = marker[1][0]; else if (fence === marker[1][0]) fence = null; return line; }
-    if (fence) return line;
-    return line.replace(/(\]\()([^\s)]+)(\))/g, (_,a,url,z) => a + rewriteUrl(url, kind, file) + z);
-  }).join('\n');
+  const text = transformMarkdown(await fs.readFile(path.join(roots[kind], file), 'utf8'), kind, file, rewriteUrl);
   const dest = path.join(out, target);
   await fs.mkdir(path.dirname(dest), { recursive: true });
   await fs.writeFile(dest, text);
 }
 await fs.cp(path.join(site,'pages'),out,{recursive:true});
 await fs.cp(path.join(site,'public'),path.join(out,'public'),{recursive:true});
-for (const kind of ['core','gui']) await fs.cp(path.join(roots[kind],'docs/badges'),path.join(out,'public/badges',kind),{recursive:true});
+for (const [source, target] of copiedAssets) {
+  const destination = path.join(out, 'public', target);
+  await fs.mkdir(path.dirname(destination), { recursive: true });
+  await fs.copyFile(source, destination);
+}
+
+const screenshots = [];
+for (const kind of ['core', 'gui']) {
+  let records;
+  try { records = JSON.parse(await fs.readFile(path.join(roots[kind], 'docs/images/screenshots.json'), 'utf8')); }
+  catch (error) { if (error.code === 'ENOENT') continue; throw error; }
+  if (!Array.isArray(records)) throw new Error('Screenshot metadata must be an array.');
+  for (const record of records) {
+    const image = assets.get(`${kind}/docs/images/${record.file}`);
+    if (!image || !['Windows', 'macOS', 'Linux', 'OpenWrt'].includes(record.platform) || !['GUI', 'CLI', 'LuCI'].includes(record.kind)) {
+      throw new Error(`Screenshot metadata must identify an existing image and its platform: ${record.file}`);
+    }
+    for (const field of ['title', 'description', 'version', 'capture']) {
+      if (typeof record[field] !== 'string' || !record[field].trim()) throw new Error(`Missing screenshot ${field}: ${record.file}`);
+    }
+    screenshots.push({ ...record, image, repository: kind });
+  }
+}
+const escapeText = text => text.replace(/[\\`*_{}[\]()<>#!|]/g, '\\$&').replace(/\r?\n/g, ' ');
+let gallery = '# 运行截图\n\n查看客户端的实际界面和终端操作，再跟着对应平台的安装说明开始使用。\n\n';
+gallery += '[Windows 图形界面](/gui/windows) · [Mac 图形界面](/gui/macos) · [Linux 图形界面](/gui/linux) · [命令行入门](/guide/getting-started)\n\n';
+for (const platform of ['Windows', 'macOS', 'Linux', 'OpenWrt']) {
+  const records = screenshots.filter(record => record.platform === platform);
+  if (!records.length) continue;
+  gallery += `## ${platform}\n\n`;
+  for (const record of records) {
+    gallery += `### ${record.kind === 'GUI' ? '图形界面' : record.kind === 'CLI' ? '命令行' : '路由器管理页'}：${escapeText(record.title)}\n\n`;
+    gallery += `${escapeText(record.description)}\n\n[![${escapeText(platform + ' ' + record.title)}](${record.image})](${record.image})\n\n[查看原图](${record.image})\n\n`;
+    gallery += `<details>\n<summary>截图来源与版本</summary>\n\n版本：${escapeText(record.version)}。${escapeText(record.capture)}\n\n</details>\n\n`;
+  }
+}
+await fs.writeFile(path.join(out, 'screenshots.md'), gallery);
+const screenshotJson = JSON.stringify(screenshots, null, 2) + '\n';
+await fs.writeFile(path.join(out, 'public/screenshots.json'), screenshotJson);
+// This local data module is imported at build time by the homepage preview.
+await fs.writeFile(path.join(out, 'screenshots-data.json'), screenshotJson);
 console.log(`Prepared ${entries.length} source documents plus the website pages.`);

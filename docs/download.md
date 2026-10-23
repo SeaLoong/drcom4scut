@@ -2,44 +2,67 @@
 
 [返回首页](../README.md)
 
-电脑用户推荐使用 **drcom4scutGUI 图形界面**，它提供账号输入框、连接按钮和状态显示。图形界面与负责连接的核心程序搭配使用，各下载一份、放在一起即可。OpenWrt 和命令行用户只需要核心。
+**电脑下载桌面一体包，路由器下载 OpenWrt 包。** 桌面一体包已包含图形界面和命令行程序，解压后既可以打开窗口连接，也可以在终端运行。
 
-## 打开下载页面
+## 1. 打开下载页
 
-- **[图形界面下载](https://github.com/SeaLoong/drcom4scutGUI/releases)**：选择含 `3.1.1` 或更新版本、与你的系统匹配的文件。
-- **[核心下载](https://github.com/SeaLoong/drcom4scut/releases)**：本指南使用 `0.5.1` 系列；图形界面 3.1.x 至少需要核心 0.5.0。
+进入 [drcom4scut 下载页](https://github.com/SeaLoong/drcom4scut/releases)，展开所选版本的 **Assets（下载文件）**。桌面一体包的文件名包含 **`desktop`**，结尾是 `.zip` 或 `.tar.gz`。
 
-GitHub 将每个版本放在一条发布记录中。**Pre-release** 表示开发预览版，会随通过检查的新代码更新；正式版由维护者另行发布，页面中的 **Latest** 指正式版。展开相应记录下的 **Assets**，选择程序压缩包。`Source code` 是给开发者使用的源码。
+标为 **Pre-release** 的是预览版；**Latest** 指向最近的正式版。选择包含所需系统一体包的发布记录，按下面的表格找到下载文件。
 
-## Windows、Mac、Linux 下载对照
+`Source code` 是供开发者编译使用的源码，`SHA256SUMS` 是下载校验清单。日常安装选择程序压缩包即可。
 
-文件名前面还有项目名与版本号，按表格中的**文件名结尾**查找即可。
+## 2. 找到你的系统和处理器
 
-| 你的电脑 | 图形界面 | 核心 |
+- **Windows**：打开“设置 → 系统 → 关于”，查看“系统类型”。常见 Intel / AMD 电脑选 x64，ARM 电脑选 ARM64。
+- **Mac**：打开“苹果菜单 → 关于本机”。Apple M 系列芯片选 ARM64，Intel 处理器选 x64。
+- **Linux**：运行 `uname -m`。`x86_64` 选 x64，`aarch64` 选 ARM64。
+
+在文件名包含 `desktop` 的下载文件中，按下表的**结尾**选择。文件名前半部分会列出包内程序的版本：
+
+| 你的电脑 | 桌面一体包的文件名结尾 | 安装步骤 |
 | --- | --- | --- |
-| Windows，Intel / AMD 处理器 | `win-x64.zip` | `x86_64-pc-windows-msvc.zip` |
-| Windows，ARM 处理器 | `win-arm64.zip` | `aarch64-pc-windows-msvc.zip` |
-| Mac，Apple M 系列芯片 | `osx-arm64.tar.gz` | `aarch64-apple-darwin.tar.gz` |
-| Mac，Intel 处理器 | `osx-x64.tar.gz` | `x86_64-apple-darwin.tar.gz` |
-| Linux，Intel / AMD 处理器 | `linux-x64.tar.gz` | `x86_64-unknown-linux-gnu.tar.gz` |
-| Linux，ARM64 处理器 | `linux-arm64.tar.gz` | `aarch64-unknown-linux-gnu.tar.gz` |
+| Windows，Intel / AMD | `win-x64.zip` | [窗口](https://github.com/SeaLoong/drcom4scutGUI/blob/master/docs/windows.md) · [终端](windows.md) |
+| Windows，ARM64 | `win-arm64.zip` | [窗口](https://github.com/SeaLoong/drcom4scutGUI/blob/master/docs/windows.md) · [终端](windows.md) |
+| Mac，Apple M 系列 | `osx-arm64.tar.gz` | [窗口](https://github.com/SeaLoong/drcom4scutGUI/blob/master/docs/macos.md) · [终端](macos.md) |
+| Mac，Intel | `osx-x64.tar.gz` | [窗口](https://github.com/SeaLoong/drcom4scutGUI/blob/master/docs/macos.md) · [终端](macos.md) |
+| Linux，Intel / AMD | `linux-x64.tar.gz` | [窗口](https://github.com/SeaLoong/drcom4scutGUI/blob/master/docs/linux.md) · [终端](linux.md) |
+| Linux，ARM64 | `linux-arm64.tar.gz` | [窗口](https://github.com/SeaLoong/drcom4scutGUI/blob/master/docs/linux.md) · [终端](linux.md) |
 
-Windows 在 **设置 → 系统 → 系统信息** 查看处理器；Mac 在 **苹果菜单 → 关于本机** 查看芯片；Linux 可运行 `uname -m`。`x86_64` 对应常见 Intel / AMD 电脑，`aarch64` 对应 ARM64。
+Mac 图形界面需要 macOS 15 或更新且受支持的系统；Linux 图形界面需要图形桌面。各系统指南包含首次打开、连接前准备和日常操作的完整步骤。
 
-Mac 图形界面适用于 macOS 15 及更新的受支持系统。Linux 图形界面需要桌面环境；详细系统要求与安装步骤见[图形界面使用说明](https://github.com/SeaLoong/drcom4scutGUI/blob/master/docs/usage.md)。
+## 3. 完整解压，选择窗口或终端
 
-## 解压并打开
+把一体包完整解压到一个便于找到的文件夹，例如文档目录下的 `drcom4scut`。保留文件夹内的全部文件，移动或备份时也可以直接操作整个文件夹。
 
-1. 将图形界面和核心解压到自己有写入权限的文件夹，保留包内其他文件。
-2. Windows / Linux 将核心 `drcom4scut.exe` / `drcom4scut` 放在 GUI 程序旁边；Mac 将 `drcom4scut` 放在 `drcom4scutGUI.app` 旁边。
-3. 打开图形界面，运行一次“环境自检”，按[使用说明](https://github.com/SeaLoong/drcom4scutGUI/blob/master/docs/usage.md)完成首次配置。
+**Windows / Linux**：窗口程序和命令行程序已经放在一起：
 
-每次发布都提供 `SHA256SUMS` 文件清单，可用它检查下载是否完整：[查看校验方法](configuration.md#检查下载的文件)。Mac 首次打开和有线网卡授权见 [Mac 指南](macos.md)。
+```text
+你的安装文件夹/
+├── drcom4scutGUI.exe    ← 窗口程序，Linux 上没有 .exe
+├── drcom4scut.exe       ← 命令行程序，Linux 上没有 .exe
+├── 开始使用.txt
+└── 其余程序文件与帮助文档
+```
 
-## OpenWrt 路由器
+**Mac**：窗口程序是 `.app`，旁边是命令行程序：
 
-核心提供 x86-64、ARM64、ARMv7、ARMv5TE 和 RISC-V 64 的静态程序包。先确认路由器处理器与固件，再按 [OpenWrt 安装指南](openwrt.md#选择程序)选包和安装。
+```text
+你的安装文件夹/
+├── drcom4scutGUI.app
+├── drcom4scut
+├── 开始使用.txt
+└── 帮助文档与配置示例
+```
 
-## 接下来
+喜欢窗口操作，打开 `drcom4scutGUI`；使用终端或 SSH，在这个文件夹打开终端，运行同包中的 `drcom4scut`。接着按上表中对应的安装指南完成第一次连接。
 
-[图形界面开始连接](https://github.com/SeaLoong/drcom4scutGUI/blob/master/docs/usage.md) · [命令行快速开始](getting-started.md) · [路由器安装](openwrt.md) · [遇到问题](troubleshooting.md)
+发布页中的 `SHA256SUMS` 可以帮助核对下载是否完整，[这里有各系统的校验命令](configuration.md#检查下载的文件)。
+
+## OpenWrt 路由器怎么选？
+
+OpenWrt 使用专门的路由器包，内含认证程序、开机运行脚本和 LuCI 管理页。支持 x86-64、ARM64、ARMv7、ARMv5TE 和 RISC-V 64 五类设备。
+
+从 [OpenWrt 安装指南](openwrt.md)开始：先确认路由器型号和处理器，再下载对应文件、上传到路由器，选择网页或 SSH 管理连接。
+
+[回到命令行入门](getting-started.md) · [图形界面日常操作](https://github.com/SeaLoong/drcom4scutGUI/blob/master/docs/usage.md) · [遇到问题](troubleshooting.md)

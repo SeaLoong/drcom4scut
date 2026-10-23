@@ -88,7 +88,7 @@ jobs:
         if: runner.os == 'Linux'
         timeout-minutes: 8
         run: |
-          for source in /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources; do
+          for source in /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources /etc/apt/apt-mirrors.txt; do
             if [[ -f "$source" ]]; then
               sudo sed -i -E 's|https?://azure\.archive\.ubuntu\.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' "$source"
             fi

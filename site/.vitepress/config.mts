@@ -12,6 +12,7 @@ export default defineConfig({
   head: [
     ['link', { rel: 'icon', type: 'image/svg+xml', href: '/drcom4scut/logo.svg' }],
     ['meta', { name: 'theme-color', content: '#087f8c' }],
+    ['noscript', {}, '<style>.VPNavBarHamburger,.VPSwitchAppearance,.VPLocalNav .menu,button.copy{display:none!important}</style>'],
     ['meta', { property: 'og:type', content: 'website' }],
     ['meta', { property: 'og:locale', content: 'zh_CN' }],
   ],
@@ -22,19 +23,26 @@ export default defineConfig({
     nav: [
       { text: '下载', link: '/guide/download' },
       { text: '开始使用', link: '/desktop' },
-      { text: '帮助中心', link: '/guide/troubleshooting' },
+      { text: '帮助中心', link: '/help' },
       { text: '更新记录', link: '/changes' },
     ],
     sidebar: [
       { text: '开始使用', items: [
+        { text: '帮助目录', link: '/help' },
         { text: '下载适合你的版本', link: '/guide/download' },
+        { text: '实际运行截图', link: '/screenshots' },
         { text: '电脑图形界面', link: '/desktop' },
         { text: '命令行快速开始', link: '/guide/getting-started' },
         { text: '连接与排障', link: '/guide/troubleshooting' },
       ] },
       { text: '安装与连接', items: [
-        { text: '图形界面完整帮助', link: '/gui/usage' },
-        { text: 'Mac 首次使用', link: '/guide/macos' },
+        { text: 'Windows 图形界面', link: '/gui/windows' },
+        { text: 'Mac 图形界面', link: '/gui/macos' },
+        { text: 'Linux 图形界面', link: '/gui/linux' },
+        { text: '图形界面日常操作', link: '/gui/usage' },
+        { text: 'Windows 命令行', link: '/guide/windows' },
+        { text: 'Linux 命令行', link: '/guide/linux' },
+        { text: 'Mac 命令行', link: '/guide/macos' },
         { text: 'OpenWrt 路由器', link: '/guide/openwrt' },
         { text: 'LuCI 路由器管理页', link: '/guide/luci' },
         { text: '校园网页登录', link: '/guide/portal' },

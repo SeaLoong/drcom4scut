@@ -1,75 +1,81 @@
 # 命令行快速开始
 
-[返回首页](../README.md)
+[返回首页](../README.md) · [下载程序](download.md)
 
-下面用终端完成一次有线连接。喜欢窗口操作的电脑用户，可以从[图形界面](https://github.com/SeaLoong/drcom4scutGUI#readme)开始。
+命令行就是在终端中输入命令来运行程序，适合喜欢终端操作或需要后台运行的用户。日常在电脑上点按钮连接，也可以直接使用[图形界面](https://github.com/SeaLoong/drcom4scutGUI)。
 
-先按[下载指南](download.md)解压核心程序，并接好校园网网线。以下命令在解压目录运行；Windows PowerShell 将 `./drcom4scut` 换成 `.\drcom4scut.exe`。
+## 第一次使用，按你的系统开始
 
-## 1. 选择网卡
+桌面一体包里已经有命令行程序，解压后即可按下面的系统指南选择网卡、填写账号并连接。图形界面与命令行共用同一份下载：
 
-在系统的网络设置中确认以太网已经连接并取得 IP 地址，然后列出网卡：
+| 系统 | 从这里开始 | 首次有线连接需要准备 |
+| --- | --- | --- |
+| Windows | [Windows 命令行](windows.md) | 安装 Npcap，然后在 PowerShell 中操作 |
+| macOS | [Mac 使用指南](macos.md) | 给当前用户授予有线网卡访问权限 |
+| Linux | [Linux 命令行](linux.md) | 给核心程序授予网卡访问权限 |
+| OpenWrt | [路由器安装](openwrt.md) | 选择匹配路由器的程序，并配置后台服务 |
 
-```sh
-./drcom4scut --list-interfaces
+校园 Wi-Fi 使用[网页登录指南](portal.md)：先连接无线网络，确认学校登录页可用，再设置自动提交账号密码。
+
+## 准备好后，文件夹里有什么？
+
+完整解压桌面一体包，保留其中的文件。命令行主要使用以下三项，后两项在首次设置时创建：
+
+| 文件 | 用来做什么 |
+| --- | --- |
+| `drcom4scut`，Windows 为 `drcom4scut.exe` | 负责校园网连接的程序 |
+| `config.yml` | 账号、使用哪张网卡，以及其他设置 |
+| `password` 或 `password.txt` | 只包含一行校园网密码，文件名与设置中的 `password_file` 一致 |
+
+用 `init` 命令生成 `config.yml`，在模板中修改账号、密码文件名和网卡名称即可。完整填写过程见上面的系统指南，其余设置先保留默认。
+
+![Linux 终端中的版本、网卡与配置检查](images/linux-cli-check.png)
+
+*命令行检查示例，截图来自 Linux 终端实际运行。*
+
+## 每次连接
+
+先进入放有上述文件的文件夹。Windows PowerShell：
+
+```powershell
+.\drcom4scut.exe --config config.yml --check-config
+.\drcom4scut.exe --config config.yml --status-file status.json
 ```
 
-复制连接校园网的网卡在 `NAME` 一列中的名称。下面用 `eth0` 举例，Mac 可能是 `en0`、`en5`，请换成自己的名称。
-
-## 2. 保存账号设置
-
-生成设置文件：
-
-```sh
-./drcom4scut init --config config.yml
-```
-
-用文本编辑器打开 `config.yml`，修改这三项，其余设置保持默认：
-
-```yaml
-username: '你的校园网账号'
-password_file: password
-interface: eth0
-```
-
-在同一目录创建名为 `password` 的纯文本文件，只写一行校园网密码，保存为 **UTF-8（无 BOM）**。Windows 若将它保存为 `password.txt`，同时把配置中的文件名改为 `password.txt` 即可。
-
-Mac / Linux 执行下面的命令，把密码文件设为仅自己可读写：
-
-```sh
-chmod 600 password
-```
-
-密码留在这个私有文件中，终端命令只填写文件名。更多设置见[密码与路径](configuration.md#密码与路径)。
-
-## 3. 检查并连接
+Mac / Linux 终端：
 
 ```sh
 ./drcom4scut --config config.yml --check-config
-./drcom4scut doctor --interface eth0
 ./drcom4scut --config config.yml --status-file status.json
 ```
 
-前两条分别检查账号设置和网卡环境；最后一条开始认证。首次有线认证需要网卡访问权限：Windows 安装 [Npcap](https://npcap.com/#download)，Mac 按[网卡授权步骤](macos.md#有线抓包权限)操作，Linux 按[首次运行说明](https://github.com/SeaLoong/drcom4scutGUI/blob/master/docs/usage.md#linux)完成授权后重新自检。
+第一条检查填写内容，显示 `Configuration is valid.` 后运行第二条，开始向学校认证。以后没有改过配置时，直接运行第二条即可。
 
-认证期间保持终端打开。默认设置会完成通常所需的完整有线流程，`profile` 保持默认即可。
+程序在运行期间保持连接，网络中断后继续尝试恢复。保留这个终端窗口，结束时按 **Ctrl-C**。
 
-## 日常使用
+## 看连接结果
 
-再次连接时，运行最后一条命令即可。程序会保持连接，并在网线恢复、地址变化或认证中断后尝试重新连接。
+运行连接的终端会显示进度。也可以另开一个终端，进入同一文件夹查看状态。
 
-另开一个终端查看连接结果：
+Windows PowerShell：
+
+```powershell
+.\drcom4scut.exe status --status-file status.json
+.\drcom4scut.exe logs --config config.yml
+```
+
+Mac / Linux：
 
 ```sh
 ./drcom4scut status --status-file status.json
-```
-
-`online` 表示当前校园网认证已完成；同时核对 `updated_at` 的更新时间，了解状态是否仍在刷新。查看最近日志：
-
-```sh
 ./drcom4scut logs --config config.yml
 ```
 
-结束时，在运行认证的终端按 **Ctrl-C**，程序会尝试退出本次会话。每张网卡使用一个认证客户端即可。
+第一条显示连接结果：`online` 为 `true` 表示校园网认证已完成，`updated_at` 是这份结果的更新时间。第二条显示最近的运行日志，适合找出连接失败的提示。
 
-[连接与排障](troubleshooting.md) · [无线网页登录](portal.md) · [配置参考](configuration.md) · [Windows 后台服务](windows-service.md)
+## 接下来
+
+- [连接与排障](troubleshooting.md)：按屏幕提示处理网卡、权限、账号和掉线问题。
+- [Windows 后台服务](windows-service.md)：需要开机后、登录系统前就联网时使用。
+- [配置参考](configuration.md)：修改日志、重连等待等选项。
+- [校园网页登录](portal.md)：让程序代为提交受支持的学校登录页。

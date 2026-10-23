@@ -2,7 +2,7 @@
 
 [返回首页](../README.md)
 
-使用客户端请从[下载安装](../README.md#下载与安装)或[图形界面](https://github.com/SeaLoong/drcom4scutGUI#readme)开始。本页面向希望修改源码、自己构建程序或维护发布的人；开发命令均在源码仓库根目录执行。
+使用客户端请从[下载安装](download.md)或[图形界面](https://github.com/SeaLoong/drcom4scutGUI#readme)开始。本页面向希望修改源码、自己构建程序或维护发布的人；开发命令均在源码仓库根目录执行。
 
 | 你的目标 | 从这里开始 |
 | --- | --- |
@@ -134,11 +134,15 @@ SDK 按其发行版生成 `.ipk` 或 `.apk`。该包只包含 JS、Shell、JSON 
 
 平台清单同时驱动构建矩阵、[打包器](https://github.com/SeaLoong/drcom4scut/blob/master/.github/scripts/package_release.py)和[发布完整性检查](https://github.com/SeaLoong/drcom4scut/blob/master/.github/scripts/verify_release.py)。Cargo 命令显式指定 target，打包前核对 ELF/PE/Mach-O、CPU、位宽、端序、静态属性、ARM 基线/ABI 和实际版本。包内包含程序、配置示例、文档、许可证及相应 OpenWrt 资源，并生成 SHA-256。`BUILD-INFO.json` 记录源码版本、提交、工作区状态和目标平台，汇总发布时再次核对。
 
+桌面下载使用包含 GUI 和核心的[一体包](download.md)。验证完成后，[一体包工作流](https://github.com/SeaLoong/drcom4scut/blob/master/.github/workflows/bundle-desktop.yml)先按 `published_at` 选出另一个仓库最新公开的发布，包含预发布，并一次固定该发布与下载文件；本仓库组件采用本次源码的构建结果。六个平台各自在原生 runner 校验、组装，并检查包内 GUI 能发现和启动核心。所选发布缺少平台、校验失败或版本不兼容时，流程会失败并保留错误原因，维护者可据此补齐发布后重新运行。
+
+两仓库的预发布与手动发布均提供这六种一体包。包名包含核心版本、GUI 版本和运行平台；`BUNDLE-INFO.json` 记录双方源码提交、原始归档 SHA-256 和构建信息，以及所选另一仓库的发布编号、标签、发布时间和预发布标记。Windows / Linux 两个程序放在同一目录，Mac 核心放在 `.app` 旁边；打包保留 `.app` 内容和签名。汇总步骤确认六个平台采用同一份对方发布，再生成完整下载校验清单。
+
 ## 自动预发布
 
-Preview 是给使用者试用最新代码的开发预览，正式版 Release 仍由维护者手动发布。用户下载说明见[首页](../README.md#下载与安装)；下面介绍维护流程。
+Preview 是给使用者试用最新代码的开发预览，正式版 Release 仍由维护者手动发布。用户下载说明见[下载指南](download.md)；下面介绍维护流程。
 
-推送到本仓库 `master` 后，全部验证和平台清单中的十一个目标构建成功才会自动创建 Preview。它直接使用本次 CI 的产物，不重新构建；PR、其他分支、fork 和手动运行普通 CI 均不发布。
+推送到本仓库 `master` 后，全部验证、平台清单中的十一个目标构建，以及六种桌面一体包检查成功才会自动创建 Preview。它直接使用本次 CI 的产物，不重新构建；PR、其他分支、fork 和手动运行普通 CI 均不发布。
 
 预发布标签为 `preview-运行号-尝试号-提交号前八位`，固定指向本次完整提交号，不覆盖已有标签。程序版本仍采用 `Cargo.toml`，下载时通过预发布标签和说明中的提交号辨认构建。Preview 标记为 Pre-release，且不会替换正式版的 Latest。
 
@@ -152,7 +156,7 @@ Preview 是给使用者试用最新代码的开发预览，正式版 Release 仍
 2. 在 GitHub 打开 **Actions → Manual release → Run workflow**，选择待发布的分支，填写与 `Cargo.toml` 版本一致的标签，如 `v0.5.1`。
 3. `draft` 默认开启。保留它会创建草稿；取消后会直接发布。
 
-工作流重新执行共用验证、检查全部平台包与校验和，核对最终标签仍指向已验证提交，然后上传到草稿。全部远端文件核验完成后，按 `draft` 选项保留草稿或公开发布。它拒绝覆盖其他提交的标签及既有 Release。只有最终发布 job 有写权限。正式发布仅接受手动触发，普通 Git 推送只会按上述条件自动创建 Preview。
+工作流重新执行共用验证、按上文相同规则选择另一仓库的最新公开版本，生成并检查六种桌面一体包及其余平台包与校验和，核对最终标签仍指向已验证提交，然后上传到草稿。全部远端文件核验完成后，按 `draft` 选项保留草稿或公开发布。它拒绝覆盖其他提交的标签及既有 Release。只有最终发布 job 有写权限。正式发布仅接受手动触发，普通 Git 推送只会按上述条件自动创建 Preview。
 
 来源快照、许可证和协议证据见[派生仓库记录](references-forks.md)与[相关客户端记录](references-clients.md)。新增兼容行为应附独立报文样本或可重复的协议测试，并明确实机验证范围。
 
@@ -167,11 +171,14 @@ Markdown 是文档的唯一来源。`site/scripts/prepare.mjs` 将本仓库的 R
 本地准备 Node.js 24，并将两个仓库放在同一父目录，执行：
 
 ```sh
-npm ci --prefix site
-npm run build --prefix site
-npm run preview --prefix site
+cd site
+npm ci
+npx playwright install --with-deps chromium
+npm run build
+npm run test:browser
+npm run preview
 ```
 
-图形界面放在其他目录时，用 `GUI_DOCS_DIR=/完整路径/drcom4scutGUI` 指定。构建结果为 `site/.vitepress/dist`；构建自动检查生成页面的本地链接、图片和标题锚点。本地搜索随静态页面发布，用户输入的搜索词留在浏览器。
+图形界面放在其他目录时，用 `GUI_DOCS_DIR=/完整路径/drcom4scutGUI` 指定。构建结果为 `site/.vitepress/dist`；构建自动检查文档转换、生成页面的本地链接、图片和标题锚点。浏览器检查覆盖搜索、慢加载入口、手机导航、主题切换、深链接和截图展示，Pages 发布前也会执行。本地搜索随静态页面发布，用户输入的搜索词留在浏览器。
 
 VitePress 当前稳定版搭配固定的 Vite 6.4.5 安全修复版本，锁文件保存确切依赖。维护时执行 `npm audit --prefix site`，并同时验证构建、导航和搜索。[Website and help](https://github.com/SeaLoong/drcom4scut/actions/workflows/pages.yml) 在推送时构建页面，PR 只检查构建；master 或手动运行可部署。[Dependency audit](https://github.com/SeaLoong/drcom4scut/actions/workflows/dependency-audit.yml) 每周检查已锁定依赖；正式发布软件仍使用前述手动流程。

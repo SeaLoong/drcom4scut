@@ -6,9 +6,13 @@
 
 下载包已包含可运行的认证程序和后台启动脚本，不用在路由器安装 Rust。路由器仍需先接好学校网线，完成自己的网络地址设置。网页管理页（LuCI）是可选的，安装认证程序后再添加即可。
 
+![OpenWrt 终端实际运行系统、客户端版本、网卡和配置检查](images/openwrt-cli-check.png)
+
+*在 OpenWrt 24.10.5 虚拟机中实际完成安装检查，使用示例配置。下文介绍如何在自己的路由器上操作。*
+
 ## 选择程序
 
-路由器使用的处理器各不相同，包选错就无法运行。先通过 SSH 登录路由器：在电脑终端执行 `ssh root@路由器地址`，把地址换成实际管理地址；密码为路由器管理密码。在路由器中运行：
+先确认路由器的处理器类型，再选择对应程序包。通过 SSH 登录路由器：在电脑终端执行 `ssh root@路由器地址`，把地址换成实际管理地址；密码为路由器管理密码。在路由器中运行：
 
 ```sh
 ubus call system board
@@ -26,13 +30,30 @@ opkg print-architecture
 | `armv5te-unknown-linux-musleabi` | 支持 ARMv5TE 指令的设备 |
 | `riscv64gc-unknown-linux-musl` | 支持 GC 扩展的 64 位 RISC-V 设备 |
 
-当前提供上表五类处理器的包。ARMv5 设备选择 ARMv5TE 包，RISC-V 设备需支持对应的指令扩展；MIPS/MIPSEL 用户需另选支持该设备的客户端。处理器型号相近仍可能有运行约定（ABI）和最低系统内核差异；不确定时提供上述命令输出和设备型号再确认。技术要求见 [Rust 平台列表](https://doc.rust-lang.org/rustc/platform-support.html)。
+当前提供上表五类处理器的包。ARMv5 设备选择 ARMv5TE 包，RISC-V 设备需支持 GC 指令扩展。选择时一并核对设备规格和固件；需要帮助时提供上述命令输出与设备型号。MIPS/MIPSEL 设备可选择面向这些处理器的其他客户端；开发者可查阅 [Rust 平台要求](https://doc.rust-lang.org/rustc/platform-support.html)。
 
 ## 安装与账号配置
 
-先下载对应包及同一版本的 `SHA256SUMS`。在电脑上计算文件的 SHA-256 并与清单比较，确认下载完整，再使用自己熟悉的文件传输工具上传到路由器并解压。程序压缩包包含可执行文件，`Source code` 供开发者使用。
+先下载对应包及同一版本的 `SHA256SUMS`，按[校验方法](configuration.md#检查下载的文件)确认文件完整。接下来把压缩包上传到路由器。下面以 x86-64 软路由、版本 0.5.1 和管理地址 `192.168.1.1` 为例；替换为自己的文件名和地址。
 
-以下命令均在**路由器的 root SSH 终端**执行。进入解压后的包目录，确认其中能看到 `openwrt` 文件夹，然后安装：
+在**电脑的 PowerShell 或终端**中，进入下载目录，执行：
+
+```sh
+scp -O drcom4scut-0.5.1-x86_64-unknown-linux-musl.tar.gz root@192.168.1.1:/tmp/
+ssh root@192.168.1.1
+```
+
+第一条上传文件，第二条登录路由器，输入的是路由器管理密码。`-O` 使用 OpenWrt 常见的文件传输方式，也可以用自己熟悉的文件传输软件上传到 `/tmp/`。
+
+登录后，在**路由器终端**解压并进入程序目录：
+
+```sh
+cd /tmp
+tar -xzf drcom4scut-0.5.1-x86_64-unknown-linux-musl.tar.gz
+cd drcom4scut-0.5.1-x86_64-unknown-linux-musl
+```
+
+在解压后的目录中运行安装器：
 
 ```sh
 sh openwrt/install.sh
@@ -40,8 +61,8 @@ sh openwrt/install.sh
 
 安装器会检查程序能否运行，再把程序放到 `/usr/bin/drcom4scut`，安装后台启动脚本；这时还不会开始认证。原来已有的账号文件和服务设置会保留，密码文件同时设为仅管理员可读写的 `0600` 权限。
 
-1. 用文本编辑器打开 `/etc/drcom4scut/config.yml`，填写 `username`。首次安装先保留其他校园参数的默认值。
-2. 在 `/etc/drcom4scut/password` 中只写一行校园网密码，保存为 UTF-8 纯文本。密码保存在这个私有文件中，其他设置只填写它的路径。
+1. 用文本编辑器打开 `/etc/drcom4scut/config.yml`，把 `username` 改成自己的完整校园网账号，其他设置先保持默认。
+2. 在 `/etc/drcom4scut/password` 中只写一行校园网密码，保存为 UTF-8 纯文本。可以在 SSH 中使用 `vi /etc/drcom4scut/password`：按 `i` 输入，按 Esc 后输入 `:wq` 并回车保存。账号配置也可用相同编辑器修改。
 3. 执行下列命令，确保只有路由器管理员能读取配置和密码：
 
    ```sh
@@ -50,7 +71,7 @@ sh openwrt/install.sh
    chmod 600 /etc/drcom4scut/config.yml /etc/drcom4scut/password
    ```
 
-配置和密码直接保存在 `/etc/drcom4scut/` 的普通文件中。自定义文件名只用字母、数字、点、下划线或短横线。服务会检查目录为 `0700`、文件为 `0400` 或 `0600`，并由 root 所有；设置完成后服务即可读取。使用独立密码文件时，让 `config.yml` 的 `password` 保持空值。
+默认路径已适合日常使用。账号设置在 `config.yml`，密码在 `password`，两者均由路由器管理员保存；上面的命令会完成所需文件权限设置。更多选项见[配置参考](configuration.md)。
 
 ## 网卡与启动
 
@@ -72,7 +93,7 @@ uci commit drcom4scut
 
 把 `eth0.2` 换成实际网卡名；留空 `interface` 则让系统继续选择。VLAN、桥接、路由和自动获取地址在 OpenWrt 网络设置中配置。
 
-**有线认证前，所选网卡应已取得可用 IPv4 地址。** 请先在 OpenWrt 的网络设置中完成地址配置；需要先认证再取得地址的网络环境另需对应的启动方案。
+**先让所选网卡取得 IPv4 地址，再开始有线认证。** 在 OpenWrt 的“网络 → 接口”中完成学校要求的地址配置，然后运行 `drcom4scut --list-interfaces` 确认列表中能看到它。
 
 先检查账号配置，再允许后台运行并启动：
 
@@ -111,19 +132,32 @@ uci commit drcom4scut
 
 LuCI 就是浏览器中打开的 OpenWrt 管理界面。装好本项目的页面后，可以在其中看状态、启动、停止、重新连接和下载诊断信息。
 
-路由器需要已安装 `luci-base`、`rpcd`、`jshn`、`logd`。在同一个解压后的核心包目录运行：
+![OpenWrt LuCI 中的连接状态、控制按钮和后台服务设置](images/openwrt-luci.png)
+
+*OpenWrt 24.10.5 的实际管理页面。截图时服务尚未启动，因此显示 Offline；填写自己的账号后，按下面的步骤开始认证。*
+
+路由器需要已安装 `luci-base`、`rpcd`、`jshn`、`logd`。在同一个解压后的路由器包目录运行：
 
 ```sh
 sh openwrt/install-luci.sh
 ```
 
-重新登录路由器管理网页，打开 **服务 → SCUT DrCOM**。先勾选启用，点击“保存并应用”，再点击启动。账号密码按上文通过 SSH 保存在私有文件中，网页负责日常连接管理。
+重新登录路由器管理网页，打开 **服务 → SCUT DrCOM**。先勾选 **Enable service（启用服务）**，点击 **Save & Apply（保存并应用）**，再点击 **Start（启动）**。账号密码按上文通过 SSH 保存，网页负责日常连接管理。
+
+| 页面上的文字 | 用途 |
+| --- | --- |
+| `Start` | 开始连接 |
+| `Stop` | 停止本次运行 |
+| `Reconnect` | 重新开始认证 |
+| `Connection status` | 查看连接阶段；`Online` 表示认证在线 |
+| `Updated` | 查看这份状态的更新时间 |
+| `Export redacted diagnostics` | 下载已筛选的诊断信息，方便反馈问题 |
 
 网页可用于各类处理器，配合对应架构的认证程序使用。详细按钮和排障说明见 [LuCI 管理页说明](https://github.com/SeaLoong/drcom4scut/blob/master/packaging/openwrt/luci-app-drcom4scut/README.md)。
 
 ## 无线门户、维护与排障
 
-使用校园 Wi-Fi 时，先在路由器网络设置中连接无线网络，再按[校园网页登录指南](portal.md)配置自动登录。这里的静态包提供 HTTP 网页认证；学校使用 HTTPS 入口时，可按[构建说明](development.md#构建特性)准备支持 HTTPS 的版本。
+使用校园 Wi-Fi 时，先在路由器网络设置中连接无线网络，再按[校园网页登录指南](portal.md)配置自动登录。路由器包提供 HTTP 网页认证；学校使用 HTTPS 入口时，可按[构建说明](development.md#构建特性)准备支持 HTTPS 的版本。
 
 替换程序前先停止服务，备份 `/etc/drcom4scut/` 和服务设置，再从新包目录执行安装器。确认账号、程序版本和文件权限后重新启动。默认示例不持续写文件日志，以减少路由器存储写入；日常查看 `logread -e drcom4scut` 即可。
 

@@ -2,7 +2,7 @@
 
 [返回首页](../README.md)
 
-这份记录供维护者核查实现依据。安装客户端可直接查看[电脑使用入口](../README.md#我应该从哪里开始)或[无线网页登录说明](portal.md)。
+这份记录供维护者核查实现依据。安装客户端可直接查看[电脑使用入口](../README.md#选一种适合你的用法)或[无线网页登录说明](portal.md)。
 
 阅读下表时，EAP/UDP 指有线网卡认证的两个阶段，Portal 指连上 Wi-Fi 后的网页登录；profile 是有线报文的兼容格式。固定提交号用于标明当时查看的源码版本，避免第三方代码后来变化后难以追溯。
 
@@ -10,7 +10,7 @@
 
 ## 检索范围
 
-GitHub repository search 使用 `scut drcom`（9 项）、`scutclient in:name`（17 项）、`scut-client in:name`（10 项）、`SCUT OpenWrt`（6 项）、`"SeaLoong/drcom4scut" in:readme`（1 项）、`SCUT network client`（4 项）及 `"华南理工大学" "客户端" in:readme`（152 项，两页全部读取）。结果重叠且包含同名无关项目，不能相加当作客户端数量。另检索 `scut 802.1x`、`"scut" "802"`、`华南理工 校园网`、`scutclient` 和 `"drcom4scut" in:readme`；公开搜索索引可能漏报，直接 fork 列表和引用链接用来补充。
+GitHub repository search 使用 `scut drcom`（9 项）、`scutclient in:name`（17 项）、`scut-client in:name`（10 项）、`SCUT OpenWrt`（6 项）、`"SeaLoong/drcom4scut" in:readme`（1 项）、`SCUT network client`（4 项）及 `"华南理工大学" "客户端" in:readme`（152 项，两页全部读取）。搜索结果有重叠和同名无关项目，客户端清单在筛选去重后记录。另检索 `scut 802.1x`、`"scut" "802"`、`华南理工 校园网`、`scutclient` 和 `"drcom4scut" in:readme`；公开搜索索引可能漏报，直接 fork 列表和引用链接用来补充。
 
 快照中的直接 fork 为核心 11 个、GUI 1 个；对应 API 返回的分支和子 fork 列表见[派生仓库记录](references-forks.md)。下表列出具有实质行为差异的来源：
 
@@ -33,14 +33,14 @@ GitHub repository search 使用 `scut drcom`（9 项）、`scutclient in:name`�
 | --- | --- | --- |
 | [drcom4scut-cpp](https://github.com/HarryHuangQi/drcom4scut-cpp) | 标准 PAE 组播目的地址的 EAP Identity 心跳 | 接受 `01:80:c2:00:00:03` 目的地址，但认证后仍锁定服务端源 MAC |
 | 同上 v0.2.3–0.2.4 | 周期 UDP 回包长期缺失时维持健康 EAP；初始建链失败仍严格处理 | 分开认证状态和 UDP 保活状态，不因 UDP 丢包自行注销 EAP |
-| 同上 `windows-31` | 260 字节 MiscInfo、网关和双 DNS、16 字节尾部、独立启动心跳 | 显式可选协议配置，保留默认 244 字节 legacy 行为；未知校区不能自动猜 profile |
+| 同上 `windows-31` | 260 字节 MiscInfo、网关和双 DNS、16 字节尾部、独立启动心跳 | 显式可选协议配置，保留默认 244 字节 legacy 行为；按已确认的网络环境选择 profile |
 | 同上地址模型 | 实际源 IPv4、EAP 认证 IPv4、UDP 载荷 IPv4 可以不同 | 绑定真实接口地址；载荷覆盖值不用于给系统配置地址 |
 | 同上及 [UDP 61440 选路诊断](https://github.com/BJ1919810/SCUT-DrMain-61440-WiFi-Route-Fix) | Wi-Fi/代理默认路由使 DNS/UDP 走错网卡 | 使用选定有线源地址/接口；诊断网络，不自动禁用 Wi-Fi 或改写系统路由 |
 | [scutclient](https://github.com/scutclient/scutclient) | 显式接口、DNS/server/version/hash、上线/下线 hook、logoff、OpenWrt 打包 | 行为独立实现；AGPL 实现代码不直接复制进当前项目 |
 | [Vitus213/scutclient-rs](https://github.com/Vitus213/scutclient-rs) | Rust 重写、退避、SIGTERM、procd/UCI、多架构目标 | 参考部署需求；设计文档不当作已通过实机测试的证据 |
 | [luci-app-scutclient-plus](https://github.com/AidenLee1994/luci-app-scutclient-plus) | 状态/配置/日志页、服务启停/重连、诊断包、随机或租约主机名 | 路由器部署需权限限制、脱敏诊断、正确区分“进程运行”与“已认证” |
-| [SCUTNetLogin](https://github.com/YiZhiQvQ/SCUTNetLogin) | Windows DPAPI、可取消重连、托盘/自启、可禁用 UDP、双协议接入 | GUI 凭据不出现在命令行；无线 Portal 必须有独立实现和验证 |
-| [SCUTNetLogin](https://github.com/YiZhiQvQ/SCUTNetLogin)、[luci-app-scut-autologin](https://github.com/Breeze1733/luci-app-scut-autologin) | `/drcom/chkstatus`、动态 AC、ePortal 登录、官方状态确认 | 与原始以太网 EAP 分开；不能以外部连通性探测代替认证成功证据 |
+| [SCUTNetLogin](https://github.com/YiZhiQvQ/SCUTNetLogin) | Windows DPAPI、可取消重连、托盘/自启、可禁用 UDP、双协议接入 | GUI 凭据不出现在命令行；无线 Portal 使用独立实现和验证 |
+| [SCUTNetLogin](https://github.com/YiZhiQvQ/SCUTNetLogin)、[luci-app-scut-autologin](https://github.com/Breeze1733/luci-app-scut-autologin) | `/drcom/chkstatus`、动态 AC、ePortal 登录、官方状态确认 | 与原始以太网 EAP 分开；以学校报告的设备在线状态确认认证结果 |
 | [CampusNet](https://github.com/CmAsterr/CampusNet) | 多账号、校区配置、暂停/恢复重连，Windows/Android | 未指定开源许可证，仅记录行为，不复制源码或宣传已支持 Android |
 | [fsn_server](https://github.com/YSunLIN/fsn_server) | 路由器 Web 状态、账号持久化、自动重连、夜间选项 | 不移植匿名 HTTP 管理、明文凭据或老式自启动方式 |
 
@@ -79,8 +79,8 @@ GitHub repository search 使用 `scut drcom`（9 项）、`scutclient in:name`�
 
 ## 适用范围
 
-无线网页登录的含义是：系统先连接校园 Wi-Fi，程序再尝试代替用户提交兼容页面的账号密码，并检查学校是否确认设备在线。它不会运行页面 JavaScript，也不支持验证码、短信、扫码或统一身份认证页面；遇到不兼容页面，用户仍应使用浏览器。`s.scut.edu.cn` 等默认主机不是所有校区的通用入口。
+无线网页登录由系统先连接校园 Wi-Fi，程序再提交兼容页面的账号密码，并检查学校确认的设备在线状态。当前实现直接处理 DrCOM/ePortal 请求；验证码、短信、扫码和统一身份认证页面使用浏览器。实际入口以学校公布的地址和浏览器页面为准。
 
-本项目的门户注销只请求退出当前会话，不承诺清除学校的自动登录或设备绑定。SCUTNetLogin 的部分实现使用 `/mac/unbind`，本项目当前使用 `/eportal/portal/logout` 并检查状态；不能据此声称两者退出行为完全相同。用户操作见[无线指南](portal.md#启动查看状态和退出)。
+本项目的门户注销请求退出当前会话，学校自动登录和设备绑定在学校网页中管理。SCUTNetLogin 的部分实现使用 `/mac/unbind`，本项目使用 `/eportal/portal/logout` 并检查状态，两者对应的退出行为分别核对。用户操作见[无线指南](portal.md#启动查看状态和退出)。
 
 这里记录的是认证与部署需求。实际校区入口由使用者核对，第三方示例服务器不是通用配置。系统负责无线关联、地址、路由、防火墙和 NAT；Android 与历史“翼起来”客户端也有不同的平台或协议边界。真实账号、私密抓包和运行日志不作为公开测试样本。传输安全、管理页面权限及连接成功判定，应按本项目的[配置](configuration.md)、[门户](portal.md)与[验证文档](development.md)分别核对。

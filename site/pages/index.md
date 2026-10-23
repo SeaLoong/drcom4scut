@@ -33,9 +33,10 @@ features:
   <h2>从下载到连接，三步开始</h2>
   <p class="home-lead">第一次使用推荐图形界面，跟着提示完成设置。</p>
   <div class="steps">
-    <section><span class="step-number">1</span><h3>选好你的版本</h3><p>按电脑系统和处理器，下载图形界面及配套核心，解压并放到一起。</p></section>
+    <section><span class="step-number">1</span><h3>选好你的版本</h3><p>按电脑系统和处理器下载一体包，解压后打开图形界面即可。</p></section>
     <section><span class="step-number">2</span><h3>填写校园网账号</h3><p>接好网线，选择实际连接的网卡，填好账号密码，运行一次环境自检。</p></section>
     <section><span class="step-number">3</span><h3>点击连接</h3><p>等待窗口显示在线。保留客户端运行，它会在断线后自动尝试恢复。</p></section>
   </div>
+  <ScreenshotPreview />
   <div class="help-panel"><div><h3>使用校园 Wi-Fi？</h3><p>先连接 Wi-Fi，再通过学校网页登录。了解兼容页面的自动登录方式、入口设置和常见问题。</p></div><a href="./guide/portal">查看校园网页登录帮助 →</a></div>
 </div>

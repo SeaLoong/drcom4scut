@@ -1,16 +1,16 @@
 # Windows 后台服务部署
 
-[返回首页](../README.md) · [普通桌面用户使用图形界面](https://github.com/SeaLoong/drcom4scutGUI)
+[返回首页](../README.md) · [Windows 命令行入门](windows.md) · [图形界面安装](https://github.com/SeaLoong/drcom4scutGUI/blob/master/docs/windows.md)
 
 如果只想登录电脑后自动联网，使用 GUI 的“登录系统时启动”和“打开后自动连接”即可。**本页面向管理员**，适合需要在任何人登录 Windows 之前就开始认证的电脑。
 
-后台服务由 Windows 管理，在后台持续运行。它使用固定名称 `drcom4scut`，以 Windows 自带的高权限系统账号（LocalSystem）运行，因此程序和密码文件都必须保护好，应保存在仅管理员与系统账号可修改的目录。
+后台服务由 Windows 管理，在后台持续运行。它使用固定名称 `drcom4scut`，以 Windows 自带的高权限系统账号（LocalSystem）运行，程序和密码集中保存在仅管理员与系统账号可修改的目录中。下文脚本会完成这些目录设置。
 
-先在终端中确认账号配置能正常认证，再安装服务。有线认证需要安装 [Npcap](https://npcap.com/#download)，它让程序能读写有线认证所需的网卡报文。无线网页登录不需要该驱动，但系统仍须先连上对应 Wi-Fi；兼容范围见[无线指南](portal.md)。同一网卡选择 GUI 或服务中的一种方式运行。
+先按 [Windows 命令行指南](windows.md)完成一次连接，再安装服务。有线认证需要安装 [Npcap](https://npcap.com/#download)，它让程序能读写有线认证所需的网卡报文。无线网页登录不需要该驱动，但系统仍须先连上对应 Wi-Fi；兼容范围见[无线指南](portal.md)。同一网卡选择 GUI 或服务中的一种方式运行。
 
 ## 准备配置
 
-从[下载页](https://github.com/SeaLoong/drcom4scut/releases)选择适合本机处理器的 Windows 核心包。在只有当前用户可访问的目录中准备 `config.yml` 和单独的 `password` 文件，例如：
+从[下载页](https://github.com/SeaLoong/drcom4scut/releases)选择适合本机处理器的 Windows 桌面一体包，解压后使用其中的 `drcom4scut.exe`。在只有当前用户可访问的目录中准备 `config.yml` 和单独的 `password` 文件，例如：
 
 ```yaml
 username: '你的校园网账号'
@@ -69,7 +69,7 @@ foreach ($name in @('drcom4scut.exe', 'config.yml', 'password')) {
 }
 ```
 
-完成后，服务使用受保护目录里的密码文件。原文件、备份和编辑器留下的临时副本也可能包含密码，应同样妥善保存。若配置改为引用另一个密码文件，该文件及其上级文件夹也必须满足相同要求；只保护 `config.yml` 还不够。
+完成后，服务使用受保护目录里的密码文件。原文件和备份同样存放在私有目录中；若自定义密码文件位置，对该文件及其上级目录使用相同的管理员访问设置。
 
 ## 安装与日常管理
 

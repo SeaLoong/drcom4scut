@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="90" height="22" role="img" aria-label="下载：预览版">
-  <title>下载：预览版</title>
+<svg xmlns="http://www.w3.org/2000/svg" width="90" height="22" role="img" aria-label="下载：桌面包">
+  <title>下载：桌面包</title>
   <linearGradient id="shade" x2="0" y2="100%">
     <stop offset="0" stop-color="#fff" stop-opacity=".12"/>
     <stop offset="1" stop-color="#000" stop-opacity=".08"/>
@@ -7,11 +7,11 @@
   <clipPath id="edge"><rect width="90" height="22" rx="3"/></clipPath>
   <g clip-path="url(#edge)">
     <rect width="36" height="22" fill="#555"/>
-    <rect x="36" width="54" height="22" fill="#d87b00"/>
+    <rect x="36" width="54" height="22" fill="#007ec6"/>
     <rect width="90" height="22" fill="url(#shade)"/>
   </g>
   <g fill="#fff" text-anchor="middle" font-family="Verdana,Arial,sans-serif" font-size="11">
     <text x="18" y="15">下载</text>
-    <text x="63" y="15">预览版</text>
+    <text x="63" y="15">桌面包</text>
   </g>
 </svg>

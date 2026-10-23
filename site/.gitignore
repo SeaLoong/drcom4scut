@@ -2,3 +2,5 @@ node_modules/
 content/
 .vitepress/cache/
 .vitepress/dist/
+test-results/
+playwright-report/

@@ -2,7 +2,7 @@
 
 [返回首页](../README.md)
 
-本页供维护者查询功能与修复的历史来源。下载本项目请直接看[安装入口](../README.md#下载与安装)，排查使用问题先看[常见情况](../README.md#连接失败怎么办)。
+本页供维护者查询功能与修复的历史来源。下载本项目请直接看[安装入口](download.md)，排查使用问题先看[常见情况](troubleshooting.md)。
 
 这里的 fork 指从本项目复制出去继续开发的 GitHub 仓库；提交号标记当时检查的代码版本，issue 是问题反馈，PR 是提交给项目的修改建议。表格保留技术细节，便于核实修复依据。
 
@@ -55,8 +55,8 @@ LuoMuQAQ 的两个 `feature/native-heroui-*` 分支主要为历史 GUI 视觉迭
 | GUI 关闭而认证子进程仍运行、断开未发送 Logoff | LuoMuQAQ 父进程监督与退出补丁、trv3wood 服务退出信号 | 核心提供有界 Logoff，GUI 对自己启动的进程执行异步退出和兜底清理，不按名称杀死其他进程。 |
 | 自诊断、自动启动、服务、日志与状态区分 | gchh1 管理 CLI、LuoMuQAQ GUI | 明确区分进程运行、EAP 成功与完整 UDP 心跳；平台启动入口与安全配置必须按对应平台验证。 |
 | EAP-only、日志关闭、DNS 命令行覆盖 | QvPing `src/main.rs` | 仅 EAP 模式不执行 UDP；状态含义须与选定的模式一致。 |
-| OpenWrt 下载产物缺失 | [issue #43](https://github.com/SeaLoong/drcom4scut/issues/43) | 产物按真实 target 构建，提供架构/ABI 说明、服务脚本和校验和，不能把任意 musl 文件称为适配所有路由器。 |
-| 旧 Npcap 非分页池增长 | [issue #38](https://github.com/SeaLoong/drcom4scut/issues/38) | 接收端使用 EAPOL 过滤和有限生命周期，提醒更新驱动；本仓库不能承诺修复 Npcap 内核驱动本身。 |
+| OpenWrt 下载产物缺失 | [issue #43](https://github.com/SeaLoong/drcom4scut/issues/43) | 产物按对应 target 构建，按处理器、ABI 和系统要求标注适用设备，提供服务脚本和校验和。 |
+| 旧 Npcap 非分页池增长 | [issue #38](https://github.com/SeaLoong/drcom4scut/issues/38) | 接收端使用 EAPOL 过滤和有限生命周期；Npcap 内核驱动由其上游维护，使用新版官方驱动。 |
 
 本表保留问题来源和行为含义。其他项目的测试数量、性能或实机结论不是本仓库的验证结果；各类自动检查与目标设备测试的范围见[开发与验证](development.md#测试层次)。
 

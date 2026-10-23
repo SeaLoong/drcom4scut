@@ -2,7 +2,7 @@
 
 [返回首页](../README.md)
 
-校园无线网通常这样使用：**先在系统里连上 Wi-Fi，再打开学校网页，输入账号密码登录。** 本项目可以替你完成兼容页面的账号密码提交，并定期查看设备是否仍在线。
+校园无线网通常这样使用：**先在系统里连上 Wi-Fi，再打开学校网页，输入账号密码登录。** 本项目可以替你完成兼容页面的账号密码提交，并定期查看设备是否仍在线。Windows、Mac、Linux 和 OpenWrt 的网页认证使用相同的设置方式。
 
 当前实现面向 **DrCOM/ePortal 账号密码页面**，依据公开客户端记录的页面请求流程编写。自动测试使用模拟服务器，校园实网兼容性仍需要实际使用反馈；验证码、短信、扫码和统一身份登录页面请使用学校网页。
 
@@ -22,7 +22,7 @@
 
 ## 配置
 
-命令行用户把下面的内容保存为 `portal.yml`，将 `base_url` 替换为自己核对过的学校登录页地址：
+命令行用户先按 [Windows](windows.md)、[Mac](macos.md)或 [Linux](linux.md)指南放好程序，再把下面的内容保存为 `portal.yml`。将 `base_url` 替换为自己核对过的学校登录页地址：
 
 ```yaml
 mode: portal
@@ -54,14 +54,21 @@ portal:
 
 ## 启动、查看状态和退出
 
-检查设置，然后开始连接：
+在程序目录中检查设置，然后开始连接。Mac / Linux：
 
 ```sh
 ./drcom4scut --config portal.yml --check-config
 ./drcom4scut --config portal.yml --status-file portal-status.json
 ```
 
-在另一个终端查看连接结果：
+Windows PowerShell：
+
+```powershell
+.\drcom4scut.exe --config portal.yml --check-config
+.\drcom4scut.exe --config portal.yml --status-file portal-status.json
+```
+
+在另一个终端查看连接结果（Windows 将开头换为 `.\drcom4scut.exe`）：
 
 ```sh
 ./drcom4scut status --status-file portal-status.json
@@ -77,13 +84,28 @@ portal:
 ./drcom4scut --config portal.yml --logoff
 ```
 
-这条命令使用登录入口和设备信息完成注销，无需读取账号密码。学校网页中的“自动登录”“记住我”或设备绑定由学校管理；希望保持离线时，可同时在学校页面关闭相关设置。
+Windows PowerShell 使用 `.\drcom4scut.exe --config portal.yml --logoff`。这条命令根据登录入口和设备信息完成注销。学校网页中的“自动登录”“记住我”或设备绑定由学校管理；希望保持离线时，可同时在学校页面关闭相关设置。
 
 ## 使用 HTTP 门户
 
 优先使用学校提供的 **HTTPS** 地址。学校只提供 `http://` 入口时，在确认地址后将 `portal.allow_http` 设为 `true`；图形界面中勾选 **“登录页使用 HTTP（明文传输）”**。HTTP 会以明文传输账号密码，这个选择由你明确启用，客户端保持所选协议。
 
-Windows、macOS 和 GNU Linux 默认包支持 HTTPS 并检查网站证书。OpenWrt 静态包提供 HTTP 网页登录；需要 HTTPS 的路由器用户可按[开发说明](development.md#构建特性)构建带 `portal-tls` 的版本。
+Windows、macOS 和 Linux 桌面一体包支持 HTTPS 并检查网站证书。OpenWrt 路由器包提供 HTTP 网页登录；需要 HTTPS 的路由器用户可按[开发说明](development.md#构建特性)构建带 `portal-tls` 的版本。
+
+## 在 OpenWrt 后台使用
+
+先完成 [OpenWrt 安装](openwrt.md)，在路由器网络设置中加入校园 Wi-Fi。把本页的网页登录设置写入 `/etc/drcom4scut/config.yml`，密码保存在 `/etc/drcom4scut/password`；学校入口为 HTTP 时，设置 `portal.allow_http: true`。
+
+服务跟随校园无线所对应的 OpenWrt 网络运行。例如该网络在“网络 → 接口”中叫 `wwan`，在路由器执行：
+
+```sh
+uci set drcom4scut.main.network='wwan'
+uci set drcom4scut.main.interface=''
+uci commit drcom4scut
+/etc/init.d/drcom4scut restart
+```
+
+把 `wwan` 换成实际网络名称。连接状态和日志的查看方法与 [OpenWrt 日常管理](openwrt.md#网卡与启动)相同。
 
 ## 常见问题
 

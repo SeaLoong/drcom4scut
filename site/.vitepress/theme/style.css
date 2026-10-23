@@ -34,3 +34,28 @@
   .help-panel { padding: 24px; align-items: flex-start; flex-direction: column; }
   .VPHero .image-src { max-height: 210px; }
 }
+
+/* Keep the official search mounted for its keyboard shortcuts and dialog; the
+   visible link has a useful destination before JavaScript becomes ready. */
+.VPNavBarSearch { display: none !important; }
+.site-search-link { display: flex; align-items: center; gap: 8px; margin-right: auto; padding: 8px 12px; border: 1px solid var(--vp-c-divider); border-radius: 8px; color: var(--vp-c-text-2); font-size: 13px; line-height: 20px; white-space: nowrap; }
+.site-search-link:hover, .site-search-link:focus-visible { color: var(--vp-c-brand-1); border-color: var(--vp-c-brand-1); }
+.site-search-link svg { fill: none; stroke: currentColor; stroke-width: 1.8; flex-shrink: 0; }
+.site-search-link kbd { font-family: inherit; font-size: 11px; color: var(--vp-c-text-3); }
+.static-navigation { position: relative; z-index: 10; display: flex; flex-wrap: wrap; gap: 12px 20px; margin: 74px 20px 0; padding: 14px 18px; border: 1px solid var(--vp-c-divider); border-radius: 10px; background: var(--vp-c-bg-soft); }
+.static-navigation a { color: var(--vp-c-brand-1); text-decoration: underline; text-underline-offset: 3px; }
+.screenshot-preview { display: grid; grid-template-columns: .8fr 1.2fr; align-items: center; gap: 36px; margin: 48px 0; }
+.screenshot-preview .eyebrow { color: var(--vp-c-brand-1); font-weight: 600; margin-bottom: 10px; }
+.screenshot-preview p { color: var(--vp-c-text-2); line-height: 1.85; }
+.screenshot-preview a { color: var(--vp-c-brand-1); font-weight: 600; }
+.screenshot-preview .screenshot-intro > a { display: inline-block; margin-top: 18px; }
+.screenshot-preview img { width: auto; max-width: 100%; max-height: 560px; height: auto; margin: 0 auto; border: 1px solid var(--vp-c-divider); border-radius: 10px; box-shadow: 0 12px 30px rgba(18, 43, 60, .09); }
+.screenshot-preview figcaption { margin-top: 10px; text-align: center; color: var(--vp-c-text-2); font-size: 13px; }
+.vp-doc img[src*="/images/"] { width: auto; max-width: 100%; max-height: 520px; height: auto; border: 1px solid var(--vp-c-divider); border-radius: 8px; margin: 20px 0; }
+@media (min-width: 960px) { .site-search-link { margin-left: 24px; } }
+@media (max-width: 767px) {
+  .site-search-link { margin-left: auto; margin-right: 10px; padding: 8px; border-color: transparent; }
+  .site-search-link kbd { display: none; }
+  .screenshot-preview { grid-template-columns: 1fr; gap: 24px; }
+}
+@media (max-width: 374px) { .site-search-link span { font-size: 12px; } }

@@ -16,7 +16,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: drcom4scut
@@ -49,6 +49,29 @@ jobs:
       - run: npm ci --prefix site
       - run: npm audit --prefix site --audit-level=moderate
       - run: npm run build --prefix site
+      - name: Prepare reliable browser dependency downloads
+        run: |
+          for source in /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources /etc/apt/apt-mirrors.txt; do
+            if [[ -f "$source" ]]; then
+              sudo sed -i -E 's|https?://azure\.archive\.ubuntu\.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' "$source"
+            fi
+          done
+          printf '%s\n' 'Acquire::Retries "3";' 'Acquire::http::Timeout "30";' 'Acquire::https::Timeout "30";' | sudo tee /etc/apt/apt.conf.d/80-drcom-ci-network > /dev/null
+      - name: Install the browser used by the website checks
+        timeout-minutes: 8
+        working-directory: drcom4scut/site
+        run: npx playwright install --with-deps chromium
+      - name: Check search, navigation and mobile interactions
+        working-directory: drcom4scut/site
+        run: npm run test:browser
+      - name: Keep browser failure details
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: website-browser-failures
+          path: drcom4scut/site/test-results
+          if-no-files-found: ignore
+          retention-days: 7
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: drcom4scut/site/.vitepress/dist

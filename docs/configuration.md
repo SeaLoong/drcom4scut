@@ -2,9 +2,9 @@
 
 [返回首页](../README.md)
 
-如果你使用图形界面，先在界面中填写账号和密码即可，不必阅读本页。这里主要供命令行用户查找配置项；第一次使用请先完成[快速开始](getting-started.md)。
+本页供命令行用户查找设置项。第一次使用从[Windows](windows.md)、[Mac](macos.md)或[Linux](linux.md)安装指南开始；图形界面用户直接在窗口填写账号和密码即可。
 
-`config.yml` 是一份纯文本设置文件。运行 `./drcom4scut init --config config.yml` 可以生成模板，发布包中也有 `config.example.yml`。保留字段名和缩进，在冒号后填写自己的内容。临时在命令行指定的设置优先于文件里的同一项。
+`config.yml` 是一份纯文本设置文件。Mac / Linux 运行 `./drcom4scut init --config config.yml`，Windows PowerShell 运行 `.\drcom4scut.exe init --config config.yml` 可以生成模板；发布包中也有 `config.example.yml`。保留字段名和缩进，在冒号后填写自己的内容。临时在命令行指定的设置优先于文件里的同一项。
 
 ## 基础配置
 
@@ -44,7 +44,7 @@ interface: eth0
 | `dns` | 模板中的四个校园 DNS | 用于把服务器域名查成地址；每项可写 `IP` 或 `IP:端口` |
 | `hostname` | 当前电脑名称 | 在有线认证时发送给学校的机器名 |
 
-未固定 `ip` 时，程序会在网卡地址变化后重新建立会话。如果同时填写网卡、硬件地址和 IP，它们必须属于同一张网卡。几张网卡使用相同硬件地址时，单靠 `mac` 选不准，需补充网卡名称或 IP。
+未固定 `ip` 时，程序会在网卡地址变化后重新建立会话。同时填写网卡、硬件地址和 IP 时，使用同一张网卡对应的信息。几张网卡使用相同硬件地址时，单靠 `mac` 选不准，需补充网卡名称或 IP。
 
 网络地址、自动获取地址（DHCP）和路由在操作系统网络设置中配置；客户端使用这些现有地址。
 
@@ -52,9 +52,9 @@ interface: eth0
 
 推荐把密码单独放在纯文本文件中：只写一行，选择 UTF-8 编码；编辑器若区分“带 BOM”和“无 BOM”，选择“无 BOM”，避免额外添加文件头。结尾有一次换行可以接受。文件名要与 `password_file` 一致，Windows 编辑器若添加了 `.txt`，同步更新配置中的文件名。
 
-Mac / Linux 执行 `chmod 600 password`，让密码仅供自己读写。使用只有一个硬链接的普通文件；只读的 `0400` 权限也可用。Windows 将文件放在当前用户的私有目录；后台服务和路由器还要满足各自指南中的管理员权限要求。
+Mac / Linux 执行 `chmod 600 password`，让密码仅供自己读写。直接创建普通文件即可；只读的 `0400` 权限也可用。Windows 将文件放在当前用户的私有目录；后台服务和路由器还要满足各自指南中的管理员权限要求。
 
-密码保存在私有文件中；图形界面会通过私有输入通道传给核心。其“记住密码”使用系统密码保护，不等于这里的纯文本文件。
+这里的密码文件是仅供自己访问的纯文本文件。图形界面的“记住密码”则使用系统密码保护，并通过私有输入通道交给核心。
 
 相对路径就是没有写完整目录的文件名，例如 `password`。它从哪里开始找，取决于填写位置：
 
@@ -71,7 +71,7 @@ Mac / Linux 执行 `chmod 600 password`，让密码仅供自己读写。使用�
 <details>
 <summary>开发集成或兼容旧配置时的密码来源顺序</summary>
 
-按以下顺序选用：`--password-stdin`、`--password-file PATH`、旧版 `--password` 参数、YAML `password_file`、YAML `password`。前三种命令行密码选项互斥；配置中不能同时有非空的 `password` 和 `password_file`。旧版明文参数只为兼容保留，不推荐日常使用。Windows 后台服务还要求服务专用的受保护密码文件，不接受交互式标准输入。
+按以下顺序选用：`--password-stdin`、`--password-file PATH`、旧版 `--password` 参数、YAML `password_file`、YAML `password`。前三种命令行密码选项互斥；配置中的 `password` 与 `password_file` 选择一种填写。旧版明文参数只为兼容保留，不推荐日常使用。Windows 后台服务还要求服务专用的受保护密码文件，不接受交互式标准输入。
 
 </details>
 
@@ -100,7 +100,8 @@ log:
 | --- | --- |
 | `time` | 学校提示时段限制后，按本机时间在何时再次尝试；格式 `HH:MM` |
 | `reconnect` / `reconnect_max` | 重连的起始等待和最大等待，单位秒；连续失败时等待逐渐增加 |
-| `heartbeat.*` | 等待学校心跳回复的时间，单位秒 |
+| `heartbeat.eap_timeout` | 有线身份认证心跳等待的基准秒数；最终等待时间还包含重试次数 |
+| `heartbeat.udp_timeout` | 有线后续会话保持连接、网页登录检查状态的间隔，单位秒 |
 | `retry.count` / `retry.interval` | 重试次数和每次间隔；间隔单位毫秒，`5000` 即 5 秒 |
 | `log.enable_console` / `enable_file` | 是否在终端显示、是否写入文件 |
 | `log.file_directory` | 日志保存目录 |
@@ -136,7 +137,7 @@ log:
 
 ## 上线与离线命令
 
-这是给有自动化需要的用户准备的功能：连接成功或离线时，额外运行一个自己信任的本地程序。默认关闭，普通用户可以跳过。
+这是给有自动化需要的用户准备的功能：连接成功或离线时，额外运行一个自己信任的本地程序。需要时再启用即可。
 
 ```yaml
 hooks:
