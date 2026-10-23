@@ -1,6 +1,6 @@
 [package]
 name = "drcom4scut"
-version = "0.6.0"
+version = "0.6.1"
 rust-version = "1.99"
 authors = ["SeaLoong <sealoongw@foxmail.com>"]
 edition = "2024"

@@ -846,7 +846,7 @@ fn install_with(
     file.write_all(binary)?;
     preserve_permissions(executable, &original, &file)?;
     #[cfg(windows)]
-    windows::preserve_dacl(executable, &replacement)?;
+    windows::preserve_security(executable, &replacement)?;
     file.sync_all()?;
     drop(file);
     // A hard link retains the original image and its metadata without first

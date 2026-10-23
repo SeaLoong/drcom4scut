@@ -155,7 +155,7 @@ Preview 是给使用者试用最新代码的开发预览，正式版 Release 仍
 ## 手动发布
 
 1. 更新 `Cargo.toml`、相关打包元数据和 [CHANGELOG](../CHANGELOG.md)，提交源码及锁文件，确认普通 CI 结果。
-2. 在 GitHub 打开 **Actions → Manual release → Run workflow**，选择待发布的分支，填写与 `Cargo.toml` 版本一致的标签，如 `v0.6.0`。
+2. 在 GitHub 打开 **Actions → Manual release → Run workflow**，选择待发布的分支，填写与 `Cargo.toml` 版本一致的标签，如 `v0.6.1`。
 3. `draft` 默认开启。保留它会创建草稿；取消后会直接发布。
 
 工作流重新执行共用验证、按上文相同规则选择另一仓库的最新公开版本，生成并检查六种桌面一体包及其余平台包与校验和，核对最终标签仍指向已验证提交，然后上传到草稿。全部远端文件核验完成后，按 `draft` 选项保留草稿或公开发布。它拒绝覆盖其他提交的标签及既有 Release。只有最终发布 job 有写权限。正式发布仅接受手动触发，普通 Git 推送只会按上述条件自动创建 Preview。
