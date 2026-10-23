@@ -90,7 +90,10 @@ for (const platform of ['Windows', 'macOS', 'Linux', 'OpenWrt']) {
   gallery += `## ${platform}\n\n`;
   for (const record of records) {
     gallery += `### ${record.kind === 'GUI' ? '图形界面' : record.kind === 'CLI' ? '命令行' : '路由器管理页'}：${escapeText(record.title)}\n\n`;
-    gallery += `${escapeText(record.description)}\n\n[![${escapeText(platform + ' ' + record.title)}](${record.image})](${record.image})\n\n[查看原图](${record.image})\n\n`;
+    const caption = record.kind === 'GUI'
+      ? `实际 ${platform} 窗口，${record.mock_update_availability ? '更新版本号为演示数据' : '使用示例账号展示连接设置'}。`
+      : record.description;
+    gallery += `${escapeText(caption)}\n\n[![${escapeText(platform + ' ' + record.title)}](${record.image})](${record.image})\n\n[查看原图](${record.image})\n\n`;
     gallery += `<details>\n<summary>截图来源与版本</summary>\n\n版本：${escapeText(record.version)}。${escapeText(record.capture)}\n\n</details>\n\n`;
   }
 }

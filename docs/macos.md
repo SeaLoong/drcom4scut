@@ -102,6 +102,8 @@ chmod 600 password
 
 `online` 为 `true` 表示校园网认证已完成，`updated_at` 是结果的更新时间。结束时回到运行认证的终端，按 **Ctrl-C**。合盖或拔掉网卡后，等系统恢复网络，再观察最新连接结果。
 
+运行 `./drcom4scut --check-update` 可查看最新正式版，`./drcom4scut --update` 发现新版后直接安装。重启后使用新版，账号和配置继续保留，见[更新指南](update.md)。
+
 ## 无线与 GUI
 
 校园 Wi-Fi 先在 macOS 的 Wi-Fi 菜单中连接，再打开学校登录页。本项目可代为提交受支持的 DrCOM/ePortal 账号密码页面，步骤见[校园网页登录](portal.md)。

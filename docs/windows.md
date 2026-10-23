@@ -103,3 +103,5 @@ notepad .\password.txt
 | 账号设置有效，但认证未成功 | 看最新日志，核对账号后缀、密码和所选网卡，按[连接与排障](troubleshooting.md)继续检查 |
 
 连接校园 Wi-Fi 时先在 Windows 中加入无线网络，再按[校园网页登录](portal.md)使用网页认证；这种方式使用普通网络连接。
+
+运行 `.\drcom4scut.exe --check-update` 可查看最新正式版，`.\drcom4scut.exe --update` 发现新版后直接安装。重启后使用新版，账号和配置继续保留，见[更新指南](update.md)。

@@ -110,6 +110,12 @@ test('update help connects desktop instructions with the core commands', async (
   await page.getByRole('link', { name: '在窗口中更新图形界面或核心', exact: true }).click();
   await expect(page).toHaveURL(/\/gui\/update$/);
   await expect(page.locator('.vp-doc')).toContainText('检查核心更新');
+  const notices = page.locator('.vp-doc img[src*="-update-available.png"]');
+  await expect(notices).toHaveCount(3);
+  for (const notice of await notices.all()) {
+    await notice.scrollIntoViewIfNeeded();
+    await expect.poll(() => notice.evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0);
+  }
   await page.getByRole('link', { name: '核心更新命令与自动提醒设置', exact: true }).click();
   await expect(page).toHaveURL(/\/guide\/update$/);
   await expect(page.locator('.vp-doc')).toContainText('--check-update');

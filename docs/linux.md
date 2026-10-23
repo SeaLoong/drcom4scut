@@ -108,6 +108,8 @@ chmod 600 password
 
 `online: true` 表示认证已完成，`updated_at` 是结果的更新时间。通过 SSH 运行时，可以在自己常用的终端会话管理器中保持程序运行；桌面用户若希望登录系统后自动连接，可使用[图形界面自动启动](https://github.com/SeaLoong/drcom4scutGUI/blob/master/docs/usage.md#自动启动和自动认证)。
 
+运行 `./drcom4scut --check-update` 可查看最新正式版，`./drcom4scut --update` 发现新版后直接安装。重启后使用新版，账号和配置继续保留，见[更新指南](update.md)。
+
 ## 常见情况
 
 | 看到什么 | 下一步 |
