@@ -95,7 +95,11 @@ append_events() {
 	# The stream is never returned verbatim. Every event is one of a closed set.
 	# A here-document avoids losing jshn's JSON state in a pipeline subshell.
 	local lines line count=0
-	lines="$(/sbin/logread -e drcom4scut 2>/dev/null | tail -n 60)"
+	# OpenWrt logread puts the syslog program tag in field 7, after the date
+	# and facility/priority. Match that tag before limiting the result count:
+	# other services can mention our name or LuCI URL in their message body.
+	lines="$(/sbin/logread -e drcom4scut 2>/dev/null |
+		awk '$7 ~ /^drcom4scut(\[[0-9]+\])?:$/ { print }' | tail -n 60)"
 	while IFS= read -r line; do
 		[ -n "$line" ] || continue
 		count=$((count + 1))

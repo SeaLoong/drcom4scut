@@ -48,6 +48,41 @@ json_dump() {
         return json.loads(result.stdout), (service_log.read_text().splitlines() if service_log.exists() else []), (uci_log.read_text().splitlines() if uci_log.exists() else [])
 
 
+def backend_logs(lines):
+    """Run the production log reader, replacing logread and JSON serialization."""
+    with tempfile.TemporaryDirectory(prefix='luci-logs-') as directory:
+        directory = Path(directory)
+        log_file = directory / 'syslog'
+        log_file.write_text('\n'.join(lines) + '\n')
+        shim = directory / 'jshn.sh'
+        shim.write_text(r'''json_init() { fixture_separator=''; }
+json_add_array() { printf '{"events":['; }
+json_add_object() { printf '%s{' "$fixture_separator"; fixture_separator=','; }
+json_add_int() { printf '"%s":%s,' "$1" "$2"; }
+json_add_string() {
+    printf '"%s":"%s"' "$1" "$2"
+    [ "$1" != event ] || printf ','
+}
+json_close_object() { printf '}'; }
+json_close_array() { printf ']}'; }
+json_dump() { printf '\n'; }
+''')
+        logread = directory / 'logread'
+        logread.write_text('#!/bin/sh\ncat "$FIXTURE_LOG_FILE"\n')
+        logread.chmod(0o755)
+        source = PLUGIN.read_text()
+        source = source.replace('. /usr/share/libubox/jshn.sh', '. "$FIXTURE_JSHN"')
+        source = source.replace('. /usr/libexec/drcom4scut-luci-sanitize.sh', '. "$FIXTURE_SANITIZE"')
+        source = source.replace('/sbin/logread -e drcom4scut', '"$FIXTURE_LOGREAD" -e drcom4scut')
+        plugin = directory / 'rpc-plugin'
+        plugin.write_text(source)
+        environment = dict(os.environ, FIXTURE_JSHN=str(shim), FIXTURE_SANITIZE=str(SANITIZE),
+                           FIXTURE_LOGREAD=str(logread), FIXTURE_LOG_FILE=str(log_file))
+        result = subprocess.run(['sh', str(plugin), 'call', 'logs'], input='{}', text=True,
+                                capture_output=True, env=environment, check=True)
+        return json.loads(result.stdout)
+
+
 class LuciTests(unittest.TestCase):
     def classify(self, function, text):
         # Input is stdin and is never interpolated into a shell command.
@@ -111,6 +146,37 @@ class LuciTests(unittest.TestCase):
                 output = self.classify('drcom_event', line)
                 self.assertEqual(output, expected)
                 self.assertNotIn(secret, output)
+
+    def test_logs_only_include_the_client_syslog_tag(self):
+        prefix = 'Fri Oct 23 19:23:48 2026 daemon.err '
+        unrelated = [
+            # Captured from an OpenWrt 24.10.5 VM while opening the LuCI page.
+            prefix + 'uhttpd[2170]: [info] luci: accepted login on /admin/services/drcom4scut for root from 192.168.1.2',
+            prefix + 'uhttpd[2170]: drcom4scut[123]: 802.1X Authorization success!',
+            prefix + 'other-drcom4scut[123]: 802.1X Authorization success!',
+            prefix + 'drcom4scut-helper[123]: 802.1X Authorization success!',
+            prefix + 'drcom4scut[]: 802.1X Authorization success!',
+            prefix + 'drcom4scut[abc]: 802.1X Authorization success!',
+        ]
+        self.assertEqual(backend_logs(unrelated), {'events': []})
+        self.assertEqual(backend_logs([
+            'Fri Oct  2 19:23:47 2026 daemon.info drcom4scut[123]: [INFO] 802.1X Authorization success!',
+            *unrelated,
+            prefix + 'drcom4scut: [ERROR] UDP send failed: fixture-private-password',
+        ]), {'events': [
+            {'sequence': 1, 'event': 'eap-authenticated', 'level': 'info'},
+            {'sequence': 2, 'event': 'transport-error', 'level': 'error'},
+        ]})
+
+    def test_unrelated_log_volume_does_not_hide_client_events(self):
+        prefix = 'Fri Oct 23 19:23:48 2026 daemon.info '
+        lines = [prefix + 'drcom4scut[123]: Shutdown requested.']
+        lines.extend(prefix + 'drcom4scut[123]: UDP heartbeat completed.' for _ in range(60))
+        lines.extend(prefix + 'uhttpd[2170]: accepted login on /admin/services/drcom4scut' for _ in range(80))
+        events = backend_logs(lines)['events']
+        self.assertEqual(len(events), 60)
+        self.assertEqual([event['sequence'] for event in events], list(range(1, 61)))
+        self.assertTrue(all(event['event'] == 'udp-heartbeat' for event in events))
 
     def test_metadata_is_limited_to_safe_fields_and_lengths(self):
         self.assertEqual(self.classify('drcom_phase', 'online'), 'online')
