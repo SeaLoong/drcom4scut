@@ -1,7 +1,7 @@
 # drcom4scut
 
 [![自动检查](https://github.com/SeaLoong/drcom4scut/actions/workflows/rust.yml/badge.svg?branch=master)](https://github.com/SeaLoong/drcom4scut/actions/workflows/rust.yml)
-[![下载桌面包](docs/badges/preview.svg)](https://github.com/SeaLoong/drcom4scut/releases)
+[![下载桌面包](docs/badges/preview.svg)](https://github.com/SeaLoong/drcom4scut/releases/latest)
 [![支持平台](docs/badges/platforms.svg)](docs/download.md)
 [![许可证](docs/badges/license.svg)](LICENSE)
 

@@ -16,7 +16,7 @@
 uname -m
 ```
 
-从[下载页](https://github.com/SeaLoong/drcom4scut/releases)选择文件名包含 **`desktop`** 的桌面一体包：
+从[下载页](https://github.com/SeaLoong/drcom4scut/releases/latest)选择文件名包含 **`desktop`** 的桌面一体包：
 
 | 输出 | 常见设备 | 文件名结尾 |
 | --- | --- | --- |

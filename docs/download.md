@@ -6,9 +6,9 @@
 
 ## 1. 打开下载页
 
-进入 [drcom4scut 下载页](https://github.com/SeaLoong/drcom4scut/releases)，展开所选版本的 **Assets（下载文件）**。桌面一体包的文件名包含 **`desktop`**，结尾是 `.zip` 或 `.tar.gz`。
+进入 [drcom4scut 下载页](https://github.com/SeaLoong/drcom4scut/releases/latest)，展开最新正式版的 **Assets（下载文件）**。桌面一体包的文件名包含 **`desktop`**，结尾是 `.zip` 或 `.tar.gz`。
 
-标为 **Pre-release** 的是预览版；**Latest** 指向最近的正式版。选择包含所需系统一体包的发布记录，按下面的表格找到下载文件。
+下载入口直接打开最新正式版（**Latest**）。按下面的表格选择文件；如需预览版或历史版本，可查看[全部发行记录](https://github.com/SeaLoong/drcom4scut/releases)。
 
 `Source code` 是供开发者编译使用的源码，`SHA256SUMS` 是下载校验清单。日常安装选择程序压缩包即可。
 

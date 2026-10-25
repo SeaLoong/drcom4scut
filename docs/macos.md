@@ -6,7 +6,7 @@
 
 ## 下载与首次运行
 
-在 **苹果菜单 → 关于本机** 查看芯片，从[下载页](https://github.com/SeaLoong/drcom4scut/releases)选择文件名包含 **`desktop`** 的桌面一体包：
+在 **苹果菜单 → 关于本机** 查看芯片，从[下载页](https://github.com/SeaLoong/drcom4scut/releases/latest)选择文件名包含 **`desktop`** 的桌面一体包：
 
 | “关于本机”显示 | 桌面一体包的文件名结尾 |
 | --- | --- |

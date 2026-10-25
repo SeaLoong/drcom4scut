@@ -10,7 +10,7 @@
 
 ## 准备配置
 
-从[下载页](https://github.com/SeaLoong/drcom4scut/releases)选择适合本机处理器的 Windows 桌面一体包，解压后使用其中的 `drcom4scut.exe`。在只有当前用户可访问的目录中准备 `config.yml` 和单独的 `password` 文件，例如：
+从[下载页](https://github.com/SeaLoong/drcom4scut/releases/latest)选择适合本机处理器的 Windows 桌面一体包，解压后使用其中的 `drcom4scut.exe`。在只有当前用户可访问的目录中准备 `config.yml` 和单独的 `password` 文件，例如：
 
 ```yaml
 username: '你的校园网账号'

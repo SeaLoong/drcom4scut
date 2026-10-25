@@ -10,7 +10,7 @@
 
 ## 1. 下载并打开程序目录
 
-在 **设置 → 系统 → 关于** 查看“系统类型”，从[下载页](https://github.com/SeaLoong/drcom4scut/releases)选择文件名包含 **`desktop`** 的桌面一体包：
+在 **设置 → 系统 → 关于** 查看“系统类型”，从[下载页](https://github.com/SeaLoong/drcom4scut/releases/latest)选择文件名包含 **`desktop`** 的桌面一体包：
 
 | 系统类型 | 选择文件名以此结尾的包 |
 | --- | --- |

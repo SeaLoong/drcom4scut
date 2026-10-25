@@ -20,7 +20,7 @@ uname -m
 opkg print-architecture
 ```
 
-这些命令显示设备型号、处理器类型和系统支持的软件包类型。使用 `apk` 管理软件的固件，将最后一条换成 `apk --print-arch`。按输出和设备规格确认后，从[下载页](https://github.com/SeaLoong/drcom4scut/releases)的最新正式版选择以下 `.tar.gz` 包，文件名中包含对应版本号。
+这些命令显示设备型号、处理器类型和系统支持的软件包类型。使用 `apk` 管理软件的固件，将最后一条换成 `apk --print-arch`。按输出和设备规格确认后，从[下载页](https://github.com/SeaLoong/drcom4scut/releases/latest)的最新正式版选择以下 `.tar.gz` 包，文件名中包含对应版本号。
 
 | 文件名中的这段文字 | 适用设备 |
 | --- | --- |

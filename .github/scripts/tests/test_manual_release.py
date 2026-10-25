@@ -112,7 +112,7 @@ class ManualReleaseTests(unittest.TestCase):
     def test_notes_link_to_every_platform_and_commit_pinned_help(self):
         notes = manual.preview.release_notes.render(REPOSITORY, SHA, "v1.2.3", bundles=self.bundles)
         for item in self.bundles.values():
-            self.assertIn(item["filename"], notes)
+            self.assertIn(f"[`{item['filename']}`](https://github.com/{REPOSITORY}/releases/download/v1.2.3/{item['filename']})", notes)
         if not REPOSITORY.endswith("GUI"):
             for platform in json.loads((HERE / "platforms.json").read_text()):
                 if platform["openwrt"]:

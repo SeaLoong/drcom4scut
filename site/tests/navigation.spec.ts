@@ -124,3 +124,11 @@ test('update help connects desktop instructions with the core commands', async (
   await expect.poll(() => decodeURI(page.url())).toMatch(/\/guide\/configuration#更新设置$/);
   await expect(page.locator('[id="更新设置"]')).toBeVisible();
 });
+
+// Download actions must reach the current release without an extra help-page hop.
+test('generic download actions point to the latest release', async ({ page }) => {
+  await page.goto('./');
+  const latest = 'https://github.com/SeaLoong/drcom4scut/releases/latest';
+  await expect(page.locator('.VPNavBar').getByRole('link', { name: '下载', exact: true })).toHaveAttribute('href', latest);
+  await expect(page.locator('.VPHero').getByRole('link', { name: '下载', exact: true })).toHaveAttribute('href', latest);
+});

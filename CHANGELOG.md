@@ -2,7 +2,7 @@
 
 [返回使用说明](README.md)
 
-这里记录各版本的功能与修复。安装和日常操作见[使用说明](README.md)，可下载的版本及其预览版 / 正式版状态见[下载页面](https://github.com/SeaLoong/drcom4scut/releases)。
+这里记录各版本的功能与修复。安装和日常操作见[使用说明](README.md)，可下载的版本及其预览版 / 正式版状态见[下载页面](https://github.com/SeaLoong/drcom4scut/releases/latest)。
 
 主分支通过检查后会自动更新预览版，下载页附带安装指引和本版改进，方便获取最新版本（[#49](https://github.com/SeaLoong/drcom4scut/issues/49)）。正式版由维护者手动发布。
 

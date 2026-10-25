@@ -21,7 +21,7 @@ export default defineConfig({
     logo: { src: '/logo.svg', alt: 'drcom4scut' },
     siteTitle: 'drcom4scut',
     nav: [
-      { text: '下载', link: '/guide/download' },
+      { text: '下载', link: 'https://github.com/SeaLoong/drcom4scut/releases/latest' },
       { text: '开始使用', link: '/desktop' },
       { text: '帮助中心', link: '/help' },
       { text: '更新记录', link: '/changes' },
@@ -29,7 +29,7 @@ export default defineConfig({
     sidebar: [
       { text: '开始使用', items: [
         { text: '帮助目录', link: '/help' },
-        { text: '下载适合你的版本', link: '/guide/download' },
+        { text: '下载与安装指南', link: '/guide/download' },
         { text: '实际运行截图', link: '/screenshots' },
         { text: '电脑图形界面', link: '/desktop' },
         { text: '命令行快速开始', link: '/guide/getting-started' },

@@ -9,8 +9,8 @@ hero:
     alt: 电脑与校园网络保持连接的示意图
   actions:
     - theme: brand
-      text: 下载与安装
-      link: /guide/download
+      text: 下载
+      link: https://github.com/SeaLoong/drcom4scut/releases/latest
     - theme: alt
       text: 第一次使用
       link: /desktop

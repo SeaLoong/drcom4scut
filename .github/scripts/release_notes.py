@@ -78,7 +78,7 @@ def render(repository, sha, tag, *, bundles, preview=False, root=ROOT):
              "### 电脑下载", "", "| 系统 / 设备 | 下载 |", "| --- | --- |"]
     for runtime in RUNTIMES:
         name = bundles[runtime]["filename"]
-        lines.append(f"| {LABELS[runtime]} | [下载一体包]({download}{name}) |")
+        lines.append(f"| {LABELS[runtime]} | [`{name}`]({download}{name}) |")
     lines += ["", "### 开始使用", "",
               "1. 下载上表的一体包，完整解压到一个文件夹。",
               "2. Windows 打开 `drcom4scutGUI.exe`，Linux 打开 `drcom4scutGUI`，Mac 打开 `drcom4scutGUI.app`。",
@@ -94,7 +94,7 @@ def render(repository, sha, tag, *, bundles, preview=False, root=ROOT):
             if platform.get("openwrt"):
                 target = platform["target"]
                 name = f"drcom4scut-{version}-{target}.tar.gz"
-                lines.append(f"| {LABELS[target]} | [下载路由器包]({download}{name}) |")
+                lines.append(f"| {LABELS[target]} | [`{name}`]({download}{name}) |")
         lines += ["", f"[OpenWrt 安装与使用]({source}docs/openwrt.md)"]
     other = "SeaLoong/drcom4scut" if gui else "SeaLoong/drcom4scutGUI"
     provenance = sample["counterpart"]
