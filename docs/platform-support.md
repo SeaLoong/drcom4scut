@@ -10,13 +10,13 @@ MIPS 是处理器架构，musl 是 C 运行库。同一种 musl 既可以静态�
 | --- | --- |
 | CPU 与指令集 | x86-64、ARMv5TE、ARMv7、ARM64、RISC-V GC 等；较新指令不能用于不支持它的旧 CPU |
 | 位数与字节序 | 32/64 位、大端/小端决定程序和数据的解释方式；MIPS 与 MIPSel 必须分别构建 |
-| ABI | 程序调用约定，包括 MIPS O32、ARM 软/硬浮点；同一 CPU 也可能使用不同 ABI |
+| ABI | 程序调用约定，包括 MIPS O32/N64、ARM 软/硬浮点；同一 CPU 也可能使用不同 ABI |
 | 操作系统与运行库 | GNU Linux 使用 glibc，OpenWrt 通常使用 musl；动态程序还需匹配加载器和共享库 |
 | 工具链 | Rust 编译器、目标标准库、C 编译器、链接器与目标系统库共同组成构建条件 |
 
 ## 源码构建矩阵与下载范围
 
-核心的[平台清单](https://github.com/SeaLoong/drcom4scut/blob/master/.github/scripts/platforms.json)包含 **20 个目标：6 个桌面目标和 14 个静态路由器目标**。这是当前源码的构建与验证范围；已有正式版不会自动增加附件，下载时以所选 Release 实际提供的文件为准。六种桌面 GUI 一体包保持独立，新增路由器目标只生成核心、procd 服务和可选 LuCI 资源，不引入 .NET。
+核心的[平台清单](https://github.com/SeaLoong/drcom4scut/blob/master/.github/scripts/platforms.json)包含 **23 个目标：6 个桌面目标和 17 个静态路由器目标**。这是当前源码的构建与验证范围；已有正式版不会自动增加附件，下载时以所选 Release 实际提供的文件为准。六种桌面 GUI 一体包保持独立，新增路由器目标只生成核心、procd 服务和可选 LuCI 资源，不引入 .NET。
 
 | 桌面系统 | x64 目标 | ARM64 目标 |
 | --- | --- | --- |
@@ -40,6 +40,9 @@ MIPS 是处理器架构，musl 是 C 运行库。同一种 musl 既可以静态�
 | `powerpc64le-unknown-linux-musl` | 64 位 PowerPC，小端、ELFv2 ABI |
 | `mips-unknown-linux-musl` | MIPS32r2，大端、O32 软浮点 ABI |
 | `mipsel-unknown-linux-musl` | MIPS32r2，小端、O32 软浮点 ABI |
+| `mips64-unknown-linux-muslabi64` | MIPS64r2，大端、N64 硬浮点 ABI，需要 FPU 与支持 N64 的 64 位 Linux 内核 |
+| `mips64el-unknown-linux-muslabi64` | MIPS64r2，小端、N64 硬浮点 ABI，需要 FPU 与支持 N64 的 64 位 Linux 内核 |
+| `mips64-openwrt-linux-musl` | MIPS64r2，大端、N64 软浮点 ABI，需要支持 N64 的 64 位 Linux 内核；可用于兼容的无 FPU 设备 |
 
 静态 musl 程序自带所需的 C 运行库，不依赖固件中的 musl 动态加载器，适合在匹配架构的不同固件间分发。它仍依赖兼容的 Linux 内核、网卡和权限；HTTPS 证书信任还需要可用的证书来源。当前发布与更新校验要求 OpenWrt 程序没有 `PT_INTERP` 动态加载器记录。
 
@@ -77,11 +80,13 @@ qemu-arm ./target/armv7-unknown-linux-musleabi/router/drcom4scut --version
 
 ## MIPS 与 MIPSel 的稳定工具链
 
-MIPS/MIPSel 已加入源码构建矩阵，分别使用大端和小端 MIPS32r2、O32、软浮点 ABI。这不覆盖 MIPS64、MIPS32r6 或所有同名路由器。Rust 1.99 的这两个目标为 Tier 3，没有可用的官方预编译目标标准库，不能直接依赖 `rustup target add`。
+MIPS 系列使用五个独立目标：MIPS32r2 大小端 O32 软浮点、MIPS64r2 大小端 N64 硬浮点，以及 MIPS64r2 大端 N64 软浮点。N64 硬浮点包要求 FPU；无 FPU 的 Octeon 等设备应选择匹配的软浮点包。三种 N64 包均不兼容 N32、O32 或 MIPS r6/NaN2008，不能只看处理器位数互换。N64 还需要支持该 ABI 的 64 位 Linux 内核；64 位 CPU 配合 32 位内核不能运行。
 
-[工具链准备脚本](https://github.com/SeaLoong/drcom4scut/blob/master/.github/scripts/setup_mips_toolchain.py)固定稳定版 Rust **1.99.1** 与 musl **1.2.5** 源码，并校验下载的 SHA-256。它使用 Rust 的 bootstrap `local-rebuild / stage0` 路径构建目标标准库，在独立目录安装交叉工具链；不修改宿主 sysroot，不需要 nightly，也不要求应用构建设置 `RUSTC_BOOTSTRAP`。CI 对这两个目标执行相同准备步骤。
+这五个目标均需从源码准备目标标准库；Rust 1.99 没有对应的官方预编译目标标准库，不能直接依赖 `rustup target add`。这仍不覆盖所有 MIPS 固件、指令集和 ABI 组合。
 
-本地步骤见[开发文档](development.md#mips-与-mipsel-工具链)。准备后仍需验证完整功能、精简功能、ELF 大小端/O32/浮点 ABI、子进程和归档更新。QEMU 测试通过只证明所用模拟器中的行为，不代表具体 OpenWrt 固件的网卡、procd/LuCI、资源占用和校园认证均已实机验证。
+[工具链准备脚本](https://github.com/SeaLoong/drcom4scut/blob/master/.github/scripts/setup_mips_toolchain.py)固定稳定版 Rust **1.99.1** 与 musl **1.2.5** 源码，并校验下载的 SHA-256。它使用 Rust 的 bootstrap `local-rebuild / stage0` 路径构建目标标准库，在独立目录安装交叉工具链；不修改宿主 sysroot，不需要 nightly，也不要求应用构建设置 `RUSTC_BOOTSTRAP`。CI 对这五个目标执行相同准备步骤，并分别检查浮点 ABI。
+
+本地步骤见[开发文档](development.md#mips-与-mipsel-工具链)。准备后仍需验证完整功能、精简功能、ELF 大小端/O32/N64/浮点 ABI、子进程和归档更新。QEMU 测试通过只证明所用模拟器中的行为，不代表具体 OpenWrt 固件的网卡、procd/LuCI、资源占用和校园认证均已实机验证。
 
 i586 也出现在 Rust 的目标列表中，但当前 TLS 依赖的实际构建需要 SSE2，不能把强制启用 SSE2 的产物称为可在旧 i586 CPU 上运行。当前采用明确要求 SSE2 的 i686 包；其他未进入清单的目标同样需要实际构建、ABI 检查和运行验证后再提供。
 
@@ -95,7 +100,7 @@ i586 也出现在 Rust 的目标列表中，但当前 TLS 依赖的实际构建�
 
 | 路线 | 适用情况与当前状态 |
 | --- | --- |
-| 完整功能、体积优化的静态包 | 当前十四个路由器目标采用 `router` 配置，适合跨匹配架构的固件分发。 |
+| 完整功能、体积优化的静态包 | 当前清单中的路由器目标采用 `router` 配置，适合跨匹配架构的固件分发。 |
 | 指定固件的 SDK 动态包 | 未来可复用系统库，由固件包管理器安装依赖；需要单独的包身份、ABI 验证和升级规则，尚未发布。 |
 | 明确裁剪能力的有线专用包 | 未来可把更新器及其 HTTP/TLS、归档依赖也设为可选，以降低占用；必须明确缺少哪些功能，不能把当前 `--no-default-features` 当成这种包。 |
 
@@ -105,7 +110,9 @@ i586 也出现在 Rust 的目标列表中，但当前 TLS 依赖的实际构建�
 
 2026-10-28，平台扩展新增的 i686、ARMv6 软/硬浮点、ARMv7 硬浮点、LoongArch64、大小端 PowerPC64、MIPS/MIPSel 共 9 个目标，均已生成完整功能程序，并在清单指定的 QEMU CPU 上通过完整与精简功能测试。MIPS/MIPSel 在平台扩展提交 `1bb0126` 上分别通过完整功能 214 项、精简功能 180 项测试；后续功能修复会增加回归用例，以对应提交的 CI 为准。优化产物通过 ABI、版本和私有配置检查，9 个实际归档也确认只有核心与 OpenWrt 服务/LuCI 资源，没有 GUI 或 .NET 运行时。
 
-CI 为大端 MIPS 与 PowerPC64 使用固定、校验 SHA-256 的静态 QEMU 10.0.13，见[模拟器准备脚本](https://github.com/SeaLoong/drcom4scut/blob/master/.github/scripts/setup_qemu.py)。Ubuntu 24.04 自带 QEMU 8.2 在这两个目标上处理跨端序 netlink 响应时，会使网卡枚举挂起；同一程序换用 QEMU 10 后可正常完成。此处通过更新模拟器解决，保留网卡枚举、协议和 CLI 测试。20 个目标的实际发布归档还会通过核心更新器安装，并执行安装后的版本检查；交叉目标的子进程使用相同 CPU runner。
+本轮新增的三种 MIPS64r2 N64 目标分别通过完整功能 233 项、精简功能 196 项测试；软浮点目标在不提供 FPU 的 `Octeon68XX` CPU 模型上验证，硬浮点目标使用 `MIPS64R2-generic`。程序、真实归档与更新器仍须通过同一套严格 ABI 和安装验证。
+
+CI 为大端 MIPS32、MIPS64 与 PowerPC64 使用固定、校验 SHA-256 的静态 QEMU 10.0.13，见[模拟器准备脚本](https://github.com/SeaLoong/drcom4scut/blob/master/.github/scripts/setup_qemu.py)。Ubuntu 24.04 自带 QEMU 8.2 在上述大端目标上处理跨端序 netlink 响应时，会使网卡枚举挂起；同一程序换用 QEMU 10 后可正常完成。此处通过更新模拟器解决，保留网卡枚举、协议和 CLI 测试。平台清单中各目标的实际发布归档还会通过核心更新器安装，并执行安装后的版本检查；交叉目标的子进程使用相同 CPU runner。
 
 强化后的 ABI 校验还验证了此前正式版的 11 个真实核心组件，均保持兼容；不会为了接受新架构而放松动态加载器、端序或浮点 ABI 检查。这些是构建、模拟器与产物验证结果，尚不代表新增目标已经在具体 OpenWrt 硬件或校园网络上通过验收。
 
@@ -123,7 +130,7 @@ CI 为大端 MIPS 与 PowerPC64 使用固定、校验 SHA-256 的静态 QEMU 10.
 
 - [Rust 平台支持与 Tier 3 定义](https://doc.rust-lang.org/rustc/platform-support.html#tier-3)
 - [Rust 1.99 MIPS musl 目标](https://github.com/rust-lang/rust/blob/1.99.0/compiler/rustc_target/src/spec/targets/mips_unknown_linux_musl.rs)与 [MIPSel musl 目标](https://github.com/rust-lang/rust/blob/1.99.0/compiler/rustc_target/src/spec/targets/mipsel_unknown_linux_musl.rs)
-- [Rust bootstrap 构建说明](https://rustc-dev-guide.rust-lang.org/building/bootstrapping.html)
+- [Rust bootstrap 构建说明](https://rustc-dev-guide.rust-lang.org/building/bootstrapping/what-bootstrapping-does.html)
 - [OpenWrt SDK 使用说明](https://openwrt.org/docs/guide-developer/toolchain/using_the_sdk)
 - [OpenWrt Rust 构建配方](https://github.com/openwrt/packages/blob/master/lang/rust/Makefile)与[目标、链接配置](https://github.com/openwrt/packages/blob/master/lang/rust/rust-values.mk)
 - [ring 的目标处理](https://github.com/briansmith/ring/blob/2723abbca9e83347d82b056d5b239c6604f786df/include/ring-core/target.h)与[构建实现](https://github.com/briansmith/ring/blob/2723abbca9e83347d82b056d5b239c6604f786df/build.rs)

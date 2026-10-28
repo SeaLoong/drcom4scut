@@ -71,7 +71,10 @@ portal = []
 portal-tls = ["portal"]
 
 [target.'cfg(unix)'.dependencies]
-libc = "0.2.191"
+# 0.2.190/191 select generic Linux constants on MIPS64 instead of MIPS UAPI.
+# Keep the last correct stable release until the fix is backported to 0.2:
+# https://github.com/rust-lang/libc/commit/299afed2a7c01abf8eebeee36b0655d49b811c79
+libc = "=0.2.189"
 
 [target.'cfg(windows)'.dependencies]
 pcap = "2.5.0"

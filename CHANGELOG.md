@@ -2,11 +2,24 @@
 
 [返回使用说明](README.md)
 
-这里记录各版本的功能与修复。安装和日常操作见[使用说明](README.md)，可下载的版本及其预览版 / 正式版状态见[下载页面](https://github.com/SeaLoong/drcom4scut/releases/latest)。
+这里记录各版本的功能与修复。安装和日常操作见[使用说明](README.md)，下载[最新正式版](https://github.com/SeaLoong/drcom4scut/releases/latest)；预览版及历史版本见[全部发行记录](https://github.com/SeaLoong/drcom4scut/releases)。
 
 主分支通过检查后会自动更新预览版，下载页附带安装指引和本版改进，方便获取最新版本（[#49](https://github.com/SeaLoong/drcom4scut/issues/49)）。正式版由维护者手动发布。
 
 下文中的 EAP / UDP 是有线认证的两个阶段，Portal 是无线网页登录，GUI 是可以点击操作的图形界面。
+
+## 当前开发版（master）
+
+以下改进随通过完整检查的预览版提供；正式版附件以对应发布页为准。
+
+- 路由器包采用保留日志、Portal、TLS 和在线更新的体积优化，并扩展 x86、ARM、LoongArch、PowerPC 和 MIPS 目标；架构、ABI 与下载范围见[平台说明](docs/platform-support.md)。路由器包不包含 GUI 或 .NET，桌面一体包仍为六个平台。
+- 增加 MIPS64r2/N64 硬浮点大小端及 OpenWrt 大端软浮点目标，需匹配支持 N64 的 64 位 Linux 内核和 FPU 条件；独立校验大小端、指令集和浮点 ABI。
+- 核心与 GUI 共用安装锁，覆盖更新替换、版本验证和回滚，防止并发更新互相覆盖；安装前再次核对已安装版本。
+- DNS 的 UDP 响应截断时，改用同一服务器的 TCP 查询，并保留指定网卡和源地址。
+- 忽略不属于当前 EAP 请求的晚到失败报文；取消或退出 Portal 时，保护已确认属于其他账号的在线会话。
+- `status` 与 `logs` 拒绝管道等特殊文件，状态文件限制为 16 KiB，日志最多读取尾部 1 MiB 并显示最后 200 行，避免异常文件挂起或整份大日志占用内存。
+- 显式注销不再读取或校验无关的账号密码字段；配置检查会明确拒绝格式错误的 `log` 设置。
+- 补充 HTTP Portal 特性组合、跨架构完整/精简运行和实际归档更新验证，模拟结果与实机校园验证分别记录。
 
 ## 0.6.1 · 2026-10-24
 

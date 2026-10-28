@@ -15,6 +15,7 @@ Packet.lib
 wpcap.lib
 
 /dist
+/artifacts
 
 # Local Python test caches
 __pycache__/

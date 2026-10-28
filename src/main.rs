@@ -1,4 +1,6 @@
 //! Console host: inspection actions do not load credentials or open a session.
+mod inspect;
+
 use drcom4scut::{
     client, device,
     settings::{self, Settings},
@@ -126,11 +128,7 @@ fn dispatch() -> Result<(), String> {
         let path = matches
             .get_one::<String>("status-file")
             .ok_or("status requires --status-file PATH")?;
-        let data = std::fs::read(path).map_err(
-            |_| "Cannot read status file; configure --status-file when starting the client",
-        )?;
-        let status: serde_json::Value =
-            serde_json::from_slice(&data).map_err(|_| "Invalid status file")?;
+        let status = inspect::status(std::path::Path::new(path))?;
         println!(
             "{}",
             serde_json::to_string_pretty(&status).map_err(|_| "Invalid status file")?
@@ -143,9 +141,7 @@ fn dispatch() -> Result<(), String> {
             .get_string("log.file_directory")
             .unwrap_or_else(|_| "./logs".into());
         let path = std::path::Path::new(&directory).join("latest.log");
-        let data = std::fs::read_to_string(path).map_err(|_| "Cannot read local log file")?;
-        let lines: Vec<_> = data.lines().rev().take(200).collect();
-        for line in lines.into_iter().rev() {
+        for line in inspect::logs(&path)? {
             println!("{line}");
         }
         return Ok(());

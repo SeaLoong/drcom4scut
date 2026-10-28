@@ -63,4 +63,4 @@ Linux 实际终端，运行 `--check-update` 后显示当前核心已是最新�
 
 Windows 将开头的 `./drcom4scut` 换成 `.\drcom4scut.exe`。长期设置使用 `config.yml` 中的 `update.proxy`，命令行参数优先。代理填写以 `/` 结尾的 HTTPS 前缀，不含用户名、密码、查询参数或 `#` 片段。
 
-检查失败时先确认已能联网，再手动重试。下载或校验未通过时，按终端提示处理后重新运行更新；也可以从[下载页](download.md)取得完整桌面包。
+检查失败时先确认已能联网，再手动重试。下载或校验未通过时，按终端提示处理后重新运行更新；也可以从[下载页](https://github.com/SeaLoong/drcom4scut/releases/latest)取得完整桌面包，选包方法见[下载指南](download.md)。

@@ -84,7 +84,9 @@ Windows PowerShell：
 ./drcom4scut --config portal.yml --logoff
 ```
 
-Windows PowerShell 使用 `.\drcom4scut.exe --config portal.yml --logoff`。这条命令根据登录入口和设备信息完成注销。学校网页中的“自动登录”“记住我”或设备绑定由学校管理；希望保持离线时，可同时在学校页面关闭相关设置。
+Windows PowerShell 使用 `.\drcom4scut.exe --config portal.yml --logoff`。这条命令根据登录入口和设备信息主动注销，不需要用户名或密码，也不会读取密码文件；`--check-config --logoff` 可只检查注销设置。自动退出清理会保护已确认属于其他账号的会话，显式 `--logoff` 则用于主动结束当前设备的会话。
+
+学校网页中的“自动登录”“记住我”或设备绑定由学校管理；希望保持离线时，可同时在学校页面关闭相关设置。
 
 ## 使用 HTTP 门户
 

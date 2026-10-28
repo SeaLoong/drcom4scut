@@ -187,7 +187,7 @@ fn checking_logout_configuration_never_opens_capture_or_sends_logoff() {
     // capture open observable without touching a real campus connection.
     std::fs::write(
         dir.path().join("config.yml"),
-        "interface: drcom4scut-test-interface-that-does-not-exist\n",
+        "interface: drcom4scut-test-interface-that-does-not-exist\nusername: [not, a, login]\npassword_file: /not/a/password\n",
     )
     .unwrap();
     let output = run(&dir, &["--check-config", "--logoff"]);
@@ -533,6 +533,57 @@ fn nonregular_configuration_is_rejected_without_waiting_for_fifo_writer() {
     let output = child.wait_with_output().unwrap();
     assert!(!output.status.success());
     assert!(output_text(&output).contains("Configuration must be a regular file"));
+}
+
+#[cfg(unix)]
+#[test]
+fn inspection_rejects_fifos_without_waiting_for_a_writer() {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    use std::process::Stdio;
+    use std::time::{Duration, Instant};
+
+    let directory = TempDir::new();
+    std::fs::create_dir(directory.path().join("logs")).unwrap();
+    std::fs::write(
+        directory.path().join("config.yml"),
+        "log: {file_directory: './logs'}\n",
+    )
+    .unwrap();
+    for (path, arguments) in [
+        (
+            "status.fifo",
+            vec!["status", "--status-file", "status.fifo"],
+        ),
+        ("logs/latest.log", vec!["logs"]),
+    ] {
+        let path = directory.path().join(path);
+        let name = CString::new(path.as_os_str().as_bytes()).unwrap();
+        // SAFETY: owned, terminated temporary path; no borrowed output pointers.
+        assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+        let mut child = command(&directory)
+            .args(arguments)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while child.try_wait().unwrap().is_none() {
+            if Instant::now() >= deadline {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("inspection waited for a FIFO writer");
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let output = child.wait_with_output().unwrap();
+        assert!(!output.status.success());
+        assert!(
+            output_text(&output).contains("regular file"),
+            "{}",
+            output_text(&output)
+        );
+    }
 }
 
 #[cfg(feature = "portal")]

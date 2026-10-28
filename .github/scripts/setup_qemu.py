@@ -1,4 +1,4 @@
-"""Install verified static QEMU for the two targets affected by Ubuntu QEMU 8.2.
+"""Install verified static QEMU for big-endian targets affected by Ubuntu QEMU 8.2.
 
 No apt sources or system packages are changed. The package hash was taken from
 Debian's signed trixie Packages index at the pinned snapshot. Its InRelease
@@ -23,12 +23,12 @@ URL = "https://snapshot.debian.org/archive/debian/20260925T181338Z/pool/main/q/q
 SHA256 = "ca6ede739327a20ae5a3498230c8a3a9a072c586e131bc6bcc1201eb1725e336"
 SIZE = 71089852
 VERSION = "10.0.13"
-EMULATORS = {"qemu-mips", "qemu-ppc64"}
+EMULATORS = {"qemu-mips", "qemu-mips64", "qemu-ppc64"}
 
 
 def checked_emulator(name):
     if name not in EMULATORS:
-        raise ValueError("Only the reviewed big-endian MIPS and PPC64 emulators are supported")
+        raise ValueError("Only the reviewed big-endian MIPS32, MIPS64 and PPC64 emulators are supported")
     return name
 
 

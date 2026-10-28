@@ -66,7 +66,7 @@ Mac / Linux 执行 `chmod 600 password`，让密码仅供自己读写。直接�
 | `status_file` / `--status-file` | 当前终端所在目录 |
 | `log.file_directory` | 当前终端所在目录 |
 
-后台部署建议写完整的绝对路径，并先建立可写的状态文件目录。查看状态时须显式指定路径，例如 `./drcom4scut status --status-file status.json`；该命令使用显式指定的路径。通过 `updated_at`（最后更新时间）可以确认状态是否仍在刷新。
+后台部署建议写完整的绝对路径，并先建立可写的状态文件目录。查看状态时须显式指定路径，例如 `./drcom4scut status --status-file status.json`。命令只读取不超过 16 KiB 的普通状态文件，不接受管道或设备文件；通过 `updated_at`（最后更新时间）可以确认状态是否仍在刷新。
 
 <details>
 <summary>开发集成或兼容旧配置时的密码来源顺序</summary>
@@ -107,11 +107,11 @@ log:
 | `log.file_directory` | 日志保存目录 |
 | `log.level` | 默认 `INFO` 适合日常使用；需要更多细节时可用 `DEBUG` |
 
-时间值须大于 0，最大重连等待应大于或等于起始等待；重试次数可以为 0。日志等级完整取值为 `OFF`、`ERROR`、`WARN`、`INFO`、`DEBUG`、`TRACE`。
+时间值须大于 0，最大重连等待应大于或等于起始等待；重试次数可以为 0。日志等级完整取值为 `OFF`、`ERROR`、`WARN`、`INFO`、`DEBUG`、`TRACE`。`log` 必须是上例这样的字段映射；关闭文件日志将其中的 `enable_file` 改为 `false`，或使用 `--no-log`，不使用 `log: false` 等缩写。
 
 排障时可临时添加 `--debug`，它会显示更详细的日志并打开终端日志输出；配置为 `TRACE` 时保留更详细的级别，显式设置 `OFF` 时日志保持关闭。
 
-默认日志名为 `latest.log`，约 1 MiB 后存成历史文件，最多保留 10 份压缩历史。`./drcom4scut logs --config config.yml` 显示当前日志最后 200 行；`--no-log` 关闭文件日志。少数精简构建没有文件日志，差异见[构建特性](development.md#构建特性)。分享日志前仍需遮住个人信息。
+默认日志名为 `latest.log`，约 1 MiB 后存成历史文件，最多保留 10 份压缩历史。`./drcom4scut logs --config config.yml` 从普通日志文件末尾最多读取 1 MiB，显示其中最后 200 行，省略被截断的首行；单条尾行超过读取上限时会明确报错，不接受管道或设备文件。`--no-log` 关闭文件日志。少数精简构建没有文件日志，差异见[构建特性](development.md#构建特性)。分享日志前仍需遮住个人信息。
 
 ## 更新设置
 
@@ -179,7 +179,7 @@ hooks:
 ./drcom4scut --config config.yml --dns 202.38.193.33 --dns 222.201.130.30
 ```
 
-后两条分别举例临时指定网卡、只运行第一阶段，以及指定备用域名查询服务器；请先确认自己的网络确实需要它们。配置检查会读取所选密码文件，但不访问网卡或发送认证请求。模板尚未填账号密码时，检查失败是正常的。
+后两条分别举例临时指定网卡、只运行第一阶段，以及指定备用域名查询服务器；请先确认自己的网络确实需要它们。普通认证配置检查会读取所选密码文件，但不访问网卡或发送认证请求。模板尚未填账号密码时，检查失败是正常的。显式使用 `--logoff` 时不读取或校验无关账号密码，`--check-config --logoff` 只检查注销需要的设置。
 
 其他参数可看 `./drcom4scut --help`。无线网页登录的字段见[无线指南](portal.md#配置)，后台服务的文件要求见 [Windows](windows-service.md) / [OpenWrt](openwrt.md)。
 

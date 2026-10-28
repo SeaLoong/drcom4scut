@@ -274,5 +274,65 @@
     "cflags": "-march=mips32r2 -mabi=32 -msoft-float",
     "std_from_source": true,
     "toolchain": "1.99.1"
+  },
+  {
+    "format": "elf",
+    "openwrt": true,
+    "features": [
+      "log4rs",
+      "portal-tls"
+    ],
+    "runner": "ubuntu-24.04",
+    "profile": "router",
+    "target": "mips64-unknown-linux-muslabi64",
+    "machine": 8,
+    "bits": 64,
+    "endian": "big",
+    "mips_float_abi": "hard",
+    "emulator": "qemu-mips64",
+    "emulator_cpu": "MIPS64R2-generic",
+    "cflags": "-march=mips64r2 -mabi=64 -mhard-float",
+    "std_from_source": true,
+    "toolchain": "1.99.1"
+  },
+  {
+    "format": "elf",
+    "openwrt": true,
+    "features": [
+      "log4rs",
+      "portal-tls"
+    ],
+    "runner": "ubuntu-24.04",
+    "profile": "router",
+    "target": "mips64el-unknown-linux-muslabi64",
+    "machine": 8,
+    "bits": 64,
+    "endian": "little",
+    "mips_float_abi": "hard",
+    "emulator": "qemu-mips64el",
+    "emulator_cpu": "MIPS64R2-generic",
+    "cflags": "-march=mips64r2 -mabi=64 -mhard-float",
+    "std_from_source": true,
+    "toolchain": "1.99.1"
+  },
+  {
+    "format": "elf",
+    "openwrt": true,
+    "features": [
+      "log4rs",
+      "portal-tls"
+    ],
+    "runner": "ubuntu-24.04",
+    "profile": "router",
+    "target": "mips64-openwrt-linux-musl",
+    "machine": 8,
+    "bits": 64,
+    "endian": "big",
+    "mips_float_abi": "soft",
+    "emulator": "qemu-mips64",
+    "emulator_cpu": "Octeon68XX",
+    "cflags": "-march=mips64r2 -mabi=64 -msoft-float",
+    "std_from_source": true,
+    "toolchain": "1.99.1"
   }
 ]

@@ -21,13 +21,15 @@ spec.loader.exec_module(verify_release)
 
 
 def elf(machine=62, bits=64, interpreter=False, *, endian="little", flags=None,
-        arm_arch=None, arm_float_abi="soft", vfp_args=None, mips_abi=True):
+        arm_arch=None, arm_float_abi="soft", vfp_args=None, mips_abi=True, mips_float_abi="hard"):
     order = "<" if endian == "little" else ">"
     data = bytearray(128)
     data[:6] = b"\x7fELF" + bytes([2 if bits == 64 else 1, 1 if endian == "little" else 2])
     struct.pack_into(order + "HH", data, 16, 2, machine)
     if flags is None:
         flags = {8: 0x70001007, 21: 2, 258: 0x43}.get(machine, 0)
+        if machine == 8 and bits == 64:
+            flags = 0x80000007
         if machine == 40:
             flags = 0x05000400 if arm_float_abi == "hard" else 0x05000200
     struct.pack_into(order + "I", data, 48 if bits == 64 else 36, flags)
@@ -53,10 +55,18 @@ def elf(machine=62, bits=64, interpreter=False, *, endian="little", flags=None,
         struct.pack_into("<I", data, 172, 0x70000003)
         struct.pack_into("<II", data, 184, 208, len(payload))
     if machine == 8 and mips_abi:
-        data.extend(bytes(max(0, 184 - len(data))))
-        struct.pack_into(order + "H", data, 44, 2)
-        struct.pack_into(order + "IIIIIIII", data, 96, 0x70000003, 160, 0, 0, 24, 24, 4, 8)
-        struct.pack_into(order + "H6B4I", data, 160, 0, 32, 2, 1, 0, 0, 3, 0, 0, 0, 0)
+        if bits == 64:
+            data.extend(bytes(max(0, 216 - len(data))))
+            struct.pack_into(order + "H", data, 56, 2)
+            struct.pack_into(order + "IIQQQQQQ", data, 120, 0x70000003, 4, 192, 0, 0, 24, 24, 8)
+            struct.pack_into(order + "H6B4I", data, 192, 0, 64, 2, 2,
+                             2 if mips_float_abi == "hard" else 0, 0,
+                             1 if mips_float_abi == "hard" else 3, 0, 0, 0, 0)
+        else:
+            data.extend(bytes(max(0, 184 - len(data))))
+            struct.pack_into(order + "H", data, 44, 2)
+            struct.pack_into(order + "IIIIIIII", data, 96, 0x70000003, 160, 0, 0, 24, 24, 4, 8)
+            struct.pack_into(order + "H6B4I", data, 160, 0, 32, 2, 1, 0, 0, 3, 0, 0, 0, 0)
     return data
 
 
@@ -64,7 +74,8 @@ def platform_elf(platform, *, wrong_cpu=False):
     return elf(62 if wrong_cpu else platform["machine"], platform["bits"],
                endian=platform.get("endian", "little"),
                arm_arch={"v5TE": 4, "v6": 6, "v7": 10}.get(platform.get("arm_arch")),
-               arm_float_abi=platform.get("arm_float_abi", "soft"))
+               arm_float_abi=platform.get("arm_float_abi", "soft"),
+               mips_float_abi=platform.get("mips_float_abi", "hard"))
 
 
 def macho(machine=16777223, filetype=2):
@@ -313,6 +324,59 @@ class PackagingTests(unittest.TestCase):
                     package_release.verify_abi_bytes(bad, platform)
             with self.assertRaisesRegex(ValueError, "Malformed MIPS"):
                 package_release.verify_abi_bytes(elf(machine=8, bits=32, endian=endian)[:-1], platform)
+
+    def test_mips64_requires_n64_mips64r2_hard_double_float_without_extensions(self):
+        for endian in ("little", "big"):
+            order = "<" if endian == "little" else ">"
+            platform = {"machine": 8, "bits": 64, "endian": endian, "format": "elf", "openwrt": True}
+            good = elf(machine=8, bits=64, endian=endian)
+            package_release.verify_abi_bytes(good, platform)
+            struct.pack_into(order + "I", good, 208, 1)
+            package_release.verify_abi_bytes(good, platform)
+            for flags in (0x70001007, 0xa0000007, 0x80001007, 0x80002007, 0x80000027,
+                          0x80000047, 0x80000107, 0x80000207, 0x80000407, 0x81000007):
+                with self.subTest(endian=endian, flags=flags), self.assertRaisesRegex(ValueError, "MIPS64r2"):
+                    package_release.verify_abi_bytes(elf(machine=8, bits=64, endian=endian, flags=flags), platform)
+            for offset, format, value in ((0, "H", 1), (2, "B", 32), (3, "B", 6), (4, "B", 1),
+                                          (5, "B", 0), (5, "B", 1), (6, "B", 1), (7, "B", 2), (7, "B", 3),
+                                          (8, "I", 1), (12, "I", 1), (16, "I", 2), (20, "I", 1)):
+                bad = elf(machine=8, bits=64, endian=endian)
+                struct.pack_into(order + format, bad, 192 + offset, value)
+                with self.subTest(endian=endian, offset=offset, value=value), self.assertRaisesRegex(ValueError, "MIPS64r2"):
+                    package_release.verify_abi_bytes(bad, platform)
+            with self.assertRaises(ValueError):
+                package_release.verify_abi_bytes(elf(machine=8, bits=32, endian=endian), platform)
+
+    def test_mips64_requires_unique_bounded_full_width_abi_segment(self):
+        for endian in ("little", "big"):
+            order = "<" if endian == "little" else ">"
+            platform = {"machine": 8, "bits": 64, "endian": endian, "format": "elf", "openwrt": True}
+            with self.assertRaisesRegex(ValueError, "one MIPS"):
+                package_release.verify_abi_bytes(elf(machine=8, bits=64, endian=endian, mips_abi=False), platform)
+            duplicate = elf(machine=8, bits=64, endian=endian)
+            duplicate[64:120] = duplicate[120:176]
+            with self.assertRaisesRegex(ValueError, "one MIPS"):
+                package_release.verify_abi_bytes(duplicate, platform)
+            for offset, value in ((128, 2**32 + 192), (128, 2**64 - 1), (152, 23),
+                                  (152, 25), (152, 2**32 + 24)):
+                bad = elf(machine=8, bits=64, endian=endian)
+                struct.pack_into(order + "Q", bad, offset, value)
+                with self.subTest(endian=endian, offset=offset, value=value), self.assertRaisesRegex(ValueError, "Malformed MIPS"):
+                    package_release.verify_abi_bytes(bad, platform)
+            with self.assertRaisesRegex(ValueError, "Malformed MIPS"):
+                package_release.verify_abi_bytes(elf(machine=8, bits=64, endian=endian)[:-1], platform)
+
+    def test_mips64_soft_float_and_hard_float_are_not_interchangeable(self):
+        for endian in ("little", "big"):
+            platform = {"machine": 8, "bits": 64, "endian": endian, "format": "elf", "openwrt": True}
+            for float_abi, other in (("soft", "hard"), ("hard", "soft")):
+                expected = platform | {"mips_float_abi": float_abi}
+                data = elf(machine=8, bits=64, endian=endian, mips_float_abi=float_abi)
+                package_release.verify_abi_bytes(data, expected)
+                with self.subTest(endian=endian, float_abi=float_abi), self.assertRaisesRegex(ValueError, "MIPS64r2"):
+                    package_release.verify_abi_bytes(data, platform | {"mips_float_abi": other})
+            with self.assertRaisesRegex(ValueError, "Unknown MIPS float ABI"):
+                package_release.verify_abi_bytes(data, platform | {"mips_float_abi": "single"})
 
     def test_truncated_or_wrong_endian_header_is_rejected(self):
         for data in [b"", b"\x7fELF", bytes(128), elf()[:60]]:

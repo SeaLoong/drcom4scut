@@ -114,7 +114,7 @@ def verify_arm_attributes(data, expected, hard_float):
         raise ValueError("Missing ARM hard-float VFP argument attribute")
 
 
-def verify_mips_attributes(data, segments, endian):
+def verify_mips_attributes(data, segments, endian, bits=32, float_abi="soft"):
     offsets = [(offset, size) for kind, offset, size in segments if kind == 0x70000003]
     if len(offsets) != 1:
         raise ValueError("Expected one MIPS ABI flags segment")
@@ -122,10 +122,15 @@ def verify_mips_attributes(data, segments, endian):
     if size != 24 or offset + size > len(data):
         raise ValueError("Malformed MIPS ABI flags segment")
     attrs = data[offset:offset + size]
-    if (number(attrs, 0, 2, endian) != 0 or attrs[2:8] != bytes([32, 2, 1, 0, 0, 3])
+    if float_abi not in ("soft", "hard") or bits == 32 and float_abi != "soft":
+        raise ValueError("Unknown MIPS float ABI")
+    expected = (bytes([64, 2, 2, 2 if float_abi == "hard" else 0, 0, 1 if float_abi == "hard" else 3])
+                if bits == 64 else bytes([32, 2, 1, 0, 0, 3]))
+    if (number(attrs, 0, 2, endian) != 0 or attrs[2:8] != expected
             or number(attrs, 8, 4, endian) != 0 or number(attrs, 12, 4, endian) != 0
             or number(attrs, 16, 4, endian) & ~1 or number(attrs, 20, 4, endian) != 0):
-        raise ValueError("Expected MIPS32r2 O32 soft-float ABI without ISA extensions")
+        abi = f"MIPS64r2 N64 {float_abi}-float" if bits == 64 else "MIPS32r2 O32 soft-float"
+        raise ValueError(f"Expected {abi} ABI without ISA extensions")
 
 
 def verify_abi_bytes(data, platform):
@@ -179,9 +184,13 @@ def verify_abi_bytes(data, platform):
         elif platform["machine"] == 258 and flags & 0xc7 != 0x43:
             raise ValueError("Expected LoongArch LP64D object ABI v1")
         elif platform["machine"] == 8:
-            if platform["bits"] != 32 or flags & 0xf000f000 != 0x70001000 or flags & 0x0fff0660:
+            n64 = platform["bits"] == 64
+            if n64 and (flags & 0xf000f000 != 0x80000000 or flags & 0x0fff0760):
+                raise ValueError("Expected MIPS64r2 N64 ELF flags")
+            if not n64 and (flags & 0xf000f000 != 0x70001000 or flags & 0x0fff0660):
                 raise ValueError("Expected MIPS32r2 O32 soft-float ELF flags")
-            verify_mips_attributes(data, segments, endian)
+            verify_mips_attributes(data, segments, endian, platform["bits"],
+                                   platform.get("mips_float_abi", "hard" if n64 else "soft"))
     elif platform["format"] == "macho":
         # Publish one thin, native executable per CPU. Universal/fat containers
         # cannot establish which slice the --version smoke test actually ran.

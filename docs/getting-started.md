@@ -1,6 +1,6 @@
 # 命令行快速开始
 
-[返回首页](../README.md) · [下载程序](download.md)
+[返回首页](../README.md) · [下载程序](https://github.com/SeaLoong/drcom4scut/releases/latest)
 
 命令行就是在终端中输入命令来运行程序，适合喜欢终端操作或需要后台运行的用户。日常在电脑上点按钮连接，也可以直接使用[图形界面](https://github.com/SeaLoong/drcom4scutGUI)。
 

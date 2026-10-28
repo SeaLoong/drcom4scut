@@ -19,7 +19,13 @@ import urllib.request
 
 RUST_VERSION = "1.99.1"
 HOST = "x86_64-unknown-linux-gnu"
-TARGETS = {"mips-unknown-linux-musl": "mips", "mipsel-unknown-linux-musl": "mipsel"}
+TARGETS = {
+    "mips-unknown-linux-musl": "mips",
+    "mipsel-unknown-linux-musl": "mipsel",
+    "mips64-unknown-linux-muslabi64": "mips64",
+    "mips64el-unknown-linux-muslabi64": "mips64el",
+    "mips64-openwrt-linux-musl": "mips64-openwrt",
+}
 # Rust: https://static.rust-lang.org/dist/rustc-1.99.1-src.tar.xz.sha256
 # musl: OpenWrt openwrt-24.10/toolchain/musl/common.mk, PKG_VERSION=1.2.5.
 SOURCES = {
@@ -38,8 +44,17 @@ def run(arguments, *, cwd=None, env=None, capture=False):
 
 def checked_target(target):
     if target not in TARGETS:
-        raise ValueError("Only the two reviewed MIPS32r2 O32 soft-float musl targets are supported")
+        raise ValueError("Only reviewed MIPS32r2 O32 and MIPS64r2 N64 musl targets are supported")
     return TARGETS[target]
+
+
+def compiler_flags(target):
+    arch = checked_target(target)
+    if target == "mips64-openwrt-linux-musl":
+        return ["-mips64r2", "-msoft-float", "-mabi=64"]
+    if arch.startswith("mips64"):
+        return ["-mips64r2", "-mhard-float", "-mabi=64"]
+    return ["-mips32r2", "-msoft-float", "-mabi=32"]
 
 
 def verify_archive(path, expected):
@@ -182,10 +197,14 @@ def github_environment(path, values):
 
 def bootstrap_environment(environment):
     # Bootstrap owns its host/target flags and artifact directories. Application
-    # linker/profile overrides must not leak into the host bootstrap build.
+    # overrides must not leak into it, especially a previous target's float ABI.
     result = dict(environment)
     for key in ("RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS", "CARGO_BUILD_TARGET", "CARGO_TARGET_DIR"):
         result.pop(key, None)
+    for key in list(result):
+        if any(key == flag or key.startswith(flag + "_") or key.endswith("_" + flag)
+               for flag in ("CFLAGS", "CXXFLAGS", "CPPFLAGS", "LDFLAGS")):
+            result.pop(key)
     return result
 
 
@@ -208,15 +227,18 @@ def setup(args):
     linker = stable / "lib/rustlib" / HOST / "bin/rust-lld"
     write_wrapper(binaries / "ld.lld", [linker, "-flavor", "gnu"])
     sysroot = prefix / f"{arch}-musl"
-    common = ["-no-canonical-prefixes", f"--target={args.target}", f"--sysroot={sysroot}",
-              "-mips32r2", "-msoft-float", "-mabi=32", f"-fuse-ld={binaries / 'ld.lld'}"]
+    # LLVM uses musl rather than Rust's muslabi64 suffix; the explicit N64
+    # compiler flag selects the matching C ABI for the 64-bit targets.
+    clang_target = args.target.replace("muslabi64", "musl")
+    common = ["-no-canonical-prefixes", f"--target={clang_target}", f"--sysroot={sysroot}",
+              *compiler_flags(args.target), f"-fuse-ld={binaries / 'ld.lld'}"]
     cc, cxx = binaries / f"{arch}-linux-musl-gcc", binaries / f"{arch}-linux-musl-g++"
     write_wrapper(cc, [clang, *common])
     write_wrapper(cxx, [clangxx, *common])
     native = work / f"musl-build-{arch}"
     native.mkdir(exist_ok=True)
-    env = os.environ | {"CC": str(cc), "AR": str(ar), "RANLIB": str(ranlib)}
-    run([musl / "configure", f"--target={args.target}", f"--prefix={sysroot}",
+    env = bootstrap_environment(os.environ) | {"CC": str(cc), "AR": str(ar), "RANLIB": str(ranlib)}
+    run([musl / "configure", f"--target={clang_target}", f"--prefix={sysroot}",
          "--disable-shared", "--disable-gcc-wrapper"], cwd=native, env=env)
     run(["make", f"-j{args.jobs}"], cwd=native, env=env)
     run(["make", "install"], cwd=native, env=env)

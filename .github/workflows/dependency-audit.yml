@@ -17,7 +17,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
-      - run: cargo install --locked cargo-audit --version 0.22.2
+      - name: Install verified official cargo-audit
+        run: python3 .github/scripts/setup_cargo_audit.py --prefix "$RUNNER_TEMP/drcom-audit" --download-dir "$RUNNER_TEMP/drcom-audit-downloads" --github-path "$GITHUB_PATH"
       - run: cargo audit --deny warnings
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:

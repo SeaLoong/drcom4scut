@@ -7,7 +7,7 @@
 
 **连接华南理工大学校园网，日常联网更省心。** 支持 Windows、macOS、Linux 和 OpenWrt；填好账号后自动保持连接，断线时继续尝试恢复。
 
-[软件首页](https://SeaLoong.github.io/drcom4scut/) · [下载程序](docs/download.md) · [使用帮助](docs/getting-started.md) · [连接问题](docs/troubleshooting.md)
+[软件首页](https://sealoong.github.io/drcom4scut/) · [下载程序](https://github.com/SeaLoong/drcom4scut/releases/latest) · [使用帮助](docs/getting-started.md) · [连接问题](docs/troubleshooting.md)
 
 ## 选一种适合你的用法
 

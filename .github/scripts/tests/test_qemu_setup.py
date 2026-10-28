@@ -41,9 +41,9 @@ def archive(members):
 
 class QemuSetupTests(unittest.TestCase):
     def test_only_reviewed_emulators_are_accepted(self):
-        for name in ("qemu-mips", "qemu-ppc64"):
+        for name in ("qemu-mips", "qemu-mips64", "qemu-ppc64"):
             self.assertEqual(qemu.checked_emulator(name), name)
-        for name in ("qemu-mipsel", "../../qemu-mips", "qemu-ppc64\n"):
+        for name in ("qemu-mipsel", "qemu-mips64el", "../../qemu-mips", "qemu-ppc64\n"):
             with self.subTest(name=name), self.assertRaises(ValueError):qemu.checked_emulator(name)
 
     def test_corrupt_cached_package_fails_without_network(self):
@@ -67,6 +67,15 @@ class QemuSetupTests(unittest.TestCase):
             self.assertEqual(target.read_bytes(), expected)
             self.assertEqual({p.name for p in directory.iterdir()}, {"selected"})
             qemu.verify_static_x64(target)
+
+    def test_mips64_uses_its_own_regular_executable(self):
+        stream = archive([("usr/bin/qemu-mips", b"wrong 32-bit emulator", False),
+                          ("usr/bin/qemu-mips64", bytes(executable()), False),
+                          ("usr/bin/qemu-mips64el", b"wrong endian emulator", False)])
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "selected"
+            qemu.extract_emulator(stream, target, "qemu-mips64")
+            self.assertEqual(target.read_bytes(), executable())
 
     def test_selected_symlink_duplicate_or_missing_member_is_rejected(self):
         cases = [[("./usr/bin/qemu-mips", b"", True)],

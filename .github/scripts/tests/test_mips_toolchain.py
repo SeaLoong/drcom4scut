@@ -19,9 +19,24 @@ class MipsToolchainTests(unittest.TestCase):
     def test_only_reviewed_targets_are_accepted(self):
         self.assertEqual(toolchain.checked_target("mips-unknown-linux-musl"), "mips")
         self.assertEqual(toolchain.checked_target("mipsel-unknown-linux-musl"), "mipsel")
-        for target in ("mips64-unknown-linux-muslabi64", "mips-unknown-linux-gnu", "--help", "mips-unknown-linux-musl\n"):
+        self.assertEqual(toolchain.checked_target("mips64-unknown-linux-muslabi64"), "mips64")
+        self.assertEqual(toolchain.checked_target("mips64el-unknown-linux-muslabi64"), "mips64el")
+        self.assertEqual(toolchain.checked_target("mips64-openwrt-linux-musl"), "mips64-openwrt")
+        for target in ("mips64-unknown-linux-gnuabi64", "mips-unknown-linux-gnu", "--help", "mips-unknown-linux-musl\n"):
             with self.subTest(target=target), self.assertRaises(ValueError):
                 toolchain.checked_target(target)
+
+    def test_n64_and_o32_toolchains_keep_distinct_float_and_pointer_abis(self):
+        for target in ("mips-unknown-linux-musl", "mipsel-unknown-linux-musl"):
+            self.assertEqual(toolchain.compiler_flags(target), ["-mips32r2", "-msoft-float", "-mabi=32"])
+        for target in ("mips64-unknown-linux-muslabi64", "mips64el-unknown-linux-muslabi64"):
+            self.assertEqual(toolchain.compiler_flags(target), ["-mips64r2", "-mhard-float", "-mabi=64"])
+        self.assertEqual(toolchain.compiler_flags("mips64-openwrt-linux-musl"),
+                         ["-mips64r2", "-msoft-float", "-mabi=64"])
+
+    def test_n64_soft_float_uses_a_separate_sysroot_and_toolchain_identity(self):
+        self.assertNotEqual(toolchain.checked_target("mips64-openwrt-linux-musl"),
+                            toolchain.checked_target("mips64-unknown-linux-muslabi64"))
 
     def test_corrupted_archive_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -103,6 +118,9 @@ class MipsToolchainTests(unittest.TestCase):
     def test_bootstrap_isolates_application_flags_and_retains_proxy_trust(self):
         environment = {"RUSTFLAGS": "-C linker=rust-lld", "CARGO_TARGET_DIR": "/application/build",
                        "CARGO_ENCODED_RUSTFLAGS": "application flags", "CARGO_BUILD_TARGET": "application-target",
+                       "CFLAGS": "-msoft-float", "CXXFLAGS_mips64_unknown_linux_muslabi64": "-mabi=32",
+                       "TARGET_CFLAGS": "-msoft-float", "HOST_CXXFLAGS": "-m32",
+                       "CPPFLAGS": "-Dprevious_target", "LDFLAGS": "-m32",
                        "HTTPS_PROXY": "policy-proxy", "SSL_CERT_FILE": "/configured-ca"}
         self.assertEqual(toolchain.bootstrap_environment(environment),
                          {"HTTPS_PROXY": "policy-proxy", "SSL_CERT_FILE": "/configured-ca"})

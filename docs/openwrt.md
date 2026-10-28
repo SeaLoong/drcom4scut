@@ -38,20 +38,23 @@ opkg print-architecture
 | `powerpc64le-unknown-linux-musl` | 64 位 PowerPC，小端、ELFv2 ABI |
 | `mips-unknown-linux-musl` | MIPS32r2，大端、O32 软浮点 ABI |
 | `mipsel-unknown-linux-musl` | MIPS32r2，小端、O32 软浮点 ABI |
+| `mips64-unknown-linux-muslabi64` | MIPS64r2，大端、N64 硬浮点 ABI，需要 FPU 与支持 N64 的 64 位 Linux 内核 |
+| `mips64el-unknown-linux-muslabi64` | MIPS64r2，小端、N64 硬浮点 ABI，需要 FPU 与支持 N64 的 64 位 Linux 内核 |
+| `mips64-openwrt-linux-musl` | MIPS64r2，大端、N64 软浮点 ABI，需要支持 N64 的 64 位 Linux 内核；可用于兼容的无 FPU 设备 |
 
-当前源码覆盖上述 14 个静态路由器目标。选择时核对设备的指令集、字节序、浮点 ABI 和内核，不能只凭 `uname -m`。例如 MIPS 与 MIPSel 大小端不同，PowerPC64 包要求 ELFv2，ARM 硬浮点包需要对应 VFP 能力，i686 包需要 SSE2。需要帮助时提供设备型号与上述命令输出，并去掉个人信息。
+上表列出当前源码覆盖的全部静态路由器目标。选择时核对设备的指令集、字节序、浮点 ABI 和内核，不能只凭 `uname -m`。例如 MIPS 与 MIPSel 大小端不同，MIPS64 的 N64 硬浮点包要求 FPU、无 FPU 设备需选软浮点包，PowerPC64 包要求 ELFv2，ARM 硬浮点包需要对应 VFP 能力，i686 包需要 SSE2。64 位 CPU 配合 32 位内核不能执行 N64 程序。需要帮助时提供设备型号与上述命令输出，并去掉个人信息。
 
 构建采用保留日志、Portal、TLS、证书校验和在线更新能力的 `router` 体积优化。MIPS 稳定工具链与各平台边界见[平台支持与路由器构建](platform-support.md)。模拟器测试不能替代具体固件和校园网实机验证；空间有限时还要核对解压大小和运行内存。
 
 
 ## 安装与账号配置
 
-先下载对应包及同一版本的 `SHA256SUMS`，按[校验方法](configuration.md#检查下载的文件)确认文件完整。接下来把压缩包上传到路由器。下面以 x86-64 软路由、版本 0.5.1 和管理地址 `192.168.1.1` 为例；替换为自己的文件名和地址。
+先下载对应包及同一版本的 `SHA256SUMS`，按[校验方法](configuration.md#检查下载的文件)确认文件完整。接下来把压缩包上传到路由器。下面以 x86-64 软路由、版本 0.6.1 和管理地址 `192.168.1.1` 为例；替换为自己所下载的文件名和地址。
 
 在**电脑的 PowerShell 或终端**中，进入下载目录，执行：
 
 ```sh
-scp -O drcom4scut-0.5.1-x86_64-unknown-linux-musl.tar.gz root@192.168.1.1:/tmp/
+scp -O drcom4scut-0.6.1-x86_64-unknown-linux-musl.tar.gz root@192.168.1.1:/tmp/
 ssh root@192.168.1.1
 ```
 
@@ -61,8 +64,8 @@ ssh root@192.168.1.1
 
 ```sh
 cd /tmp
-tar -xzf drcom4scut-0.5.1-x86_64-unknown-linux-musl.tar.gz
-cd drcom4scut-0.5.1-x86_64-unknown-linux-musl
+tar -xzf drcom4scut-0.6.1-x86_64-unknown-linux-musl.tar.gz
+cd drcom4scut-0.6.1-x86_64-unknown-linux-musl
 ```
 
 在解压后的目录中运行安装器：

@@ -26,6 +26,9 @@ LABELS = {
     "powerpc64le-unknown-linux-musl": "OpenWrt · PowerPC64（小端、ELFv2）",
     "mips-unknown-linux-musl": "OpenWrt · MIPS32r2（大端、O32 软浮点）",
     "mipsel-unknown-linux-musl": "OpenWrt · MIPS32r2（小端、O32 软浮点）",
+    "mips64-unknown-linux-muslabi64": "OpenWrt · MIPS64r2（大端、N64 硬浮点）",
+    "mips64el-unknown-linux-muslabi64": "OpenWrt · MIPS64r2（小端、N64 硬浮点）",
+    "mips64-openwrt-linux-musl": "OpenWrt · MIPS64r2（大端、N64 软浮点）",
 }
 
 

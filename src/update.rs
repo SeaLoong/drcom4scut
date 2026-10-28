@@ -207,6 +207,8 @@ enum ElfAbi {
     LoongArchLp64d,
     PowerPc64ElfV2,
     Mips32r2O32Soft,
+    Mips64r2N64Hard,
+    Mips64r2N64Soft,
 }
 
 impl Target {
@@ -243,7 +245,10 @@ impl Target {
 }
 
 fn target_named(name: &str) -> Result<Target, UpdateError> {
-    use ElfAbi::{Arm, Generic, LoongArchLp64d, Mips32r2O32Soft, PowerPc64ElfV2};
+    use ElfAbi::{
+        Arm, Generic, LoongArchLp64d, Mips32r2O32Soft, Mips64r2N64Hard, Mips64r2N64Soft,
+        PowerPc64ElfV2,
+    };
     use Endian::{Big, Little};
     // Keep identity and verification parameters in one registry. Unknown names
     // must never inherit another platform's asset name or ABI.
@@ -348,6 +353,30 @@ fn target_named(name: &str) -> Result<Target, UpdateError> {
             true,
             Little,
             Mips32r2O32Soft,
+        ),
+        Target::elf(
+            "mips64-unknown-linux-muslabi64",
+            8,
+            64,
+            true,
+            Big,
+            Mips64r2N64Hard,
+        ),
+        Target::elf(
+            "mips64el-unknown-linux-muslabi64",
+            8,
+            64,
+            true,
+            Little,
+            Mips64r2N64Hard,
+        ),
+        Target::elf(
+            "mips64-openwrt-linux-musl",
+            8,
+            64,
+            true,
+            Big,
+            Mips64r2N64Soft,
         ),
         Target::desktop("x86_64-apple-darwin", 0x1000007, "macho"),
         Target::desktop("aarch64-apple-darwin", 0x100000c, "macho"),
@@ -478,13 +507,15 @@ pub async fn apply_latest(options: &UpdateOptions) -> Result<UpdateOutcome, Upda
     let transport = Transport::new(options)?;
     let target = target_named(env!("DRCOM_BUILD_TARGET"))?;
     let executable = std::env::current_exe()?.canonicalize()?;
-    let inspected = executable.clone();
-    let original_digest = tokio::task::spawn_blocking(move || executable_digest(&inspected))
-        .await
-        .map_err(|_| invalid("cannot inspect the executable while preparing the update"))??;
+    // Retain the original image before any request can race another installer.
+    // Failed checks and up-to-date releases need no full executable hash.
+    let original = open_executable(&executable)?;
     let Some(release) = check_with(&transport, env!("CARGO_PKG_VERSION"), target).await? else {
         return Ok(UpdateOutcome::UpToDate);
     };
+    let original_digest = tokio::task::spawn_blocking(move || digest_file(original))
+        .await
+        .map_err(|_| invalid("cannot inspect the executable while preparing the update"))??;
     let binary = download_binary(&transport, &release).await?;
     tokio::task::spawn_blocking(move || {
         install_checked(&executable, &binary, Some(original_digest), || Ok(()))
@@ -814,7 +845,16 @@ fn verify_abi(data: &[u8], target: Target) -> Result<(), UpdateError> {
                             "MIPS update requires generic MIPS32r2 O32 soft-float ABI",
                         ));
                     }
-                    verify_mips_attributes(data, target.endian, offset, size, count)?;
+                    verify_mips_attributes(data, target, offset, size, count)?;
+                }
+                ElfAbi::Mips64r2N64Hard | ElfAbi::Mips64r2N64Soft => {
+                    // N64 has no EF_MIPS_ABI field. ABI2 identifies N32, while
+                    // 32BITMODE, FP64 (an O32 convention) and NaN2008 are also
+                    // incompatible with the generic MIPS64r2 N64 release.
+                    if flags & 0xf000f000 != 0x80000000 || flags & 0x0fff0760 != 0 {
+                        return Err(invalid("MIPS64 update requires generic MIPS64r2 N64 ABI"));
+                    }
+                    verify_mips_attributes(data, target, offset, size, count)?;
                 }
                 ElfAbi::LoongArchLp64d | ElfAbi::PowerPc64ElfV2 => (),
             }
@@ -1000,11 +1040,18 @@ fn verify_arm_attributes(data: &[u8], expected: u8, hard_float: bool) -> Result<
 
 fn verify_mips_attributes(
     data: &[u8],
-    endian: Endian,
+    target: Target,
     ph_offset: u64,
     ph_size: u64,
     ph_count: u64,
 ) -> Result<(), UpdateError> {
+    let endian = target.endian;
+    let expected = match target.elf_abi {
+        ElfAbi::Mips32r2O32Soft => [32, 2, 1, 0, 0, 3],
+        ElfAbi::Mips64r2N64Hard => [64, 2, 2, 2, 0, 1],
+        ElfAbi::Mips64r2N64Soft => [64, 2, 2, 0, 0, 3],
+        _ => return Err(invalid("unsupported MIPS ABI target")),
+    };
     let read = |offset, size| ordered_number(data, offset, size, endian);
     let mut found = false;
     for index in 0..ph_count {
@@ -1016,8 +1063,13 @@ fn verify_mips_attributes(
         if found {
             return Err(invalid("duplicate MIPS ABI flags"));
         }
-        let start = read(header + 4, 4)? as usize;
-        let length = read(header + 16, 4)?;
+        let (start, length) = if target.bits == 64 {
+            (read(header + 8, 8)?, read(header + 32, 8)?)
+        } else {
+            (read(header + 4, 4)?, read(header + 16, 4)?)
+        };
+        let start =
+            usize::try_from(start).map_err(|_| invalid("MIPS ABI flags offset overflow"))?;
         if length != 24 {
             return Err(invalid("invalid MIPS ABI flags size"));
         }
@@ -1029,10 +1081,10 @@ fn verify_mips_attributes(
                         .ok_or_else(|| invalid("MIPS ABI flags offset overflow"))?,
             )
             .ok_or_else(|| invalid("truncated MIPS ABI flags"))?;
-        // ELF_MIPS_ABIFlags_v0: MIPS32r2, 32-bit GPRs, no coprocessor
-        // registers, soft-float, and no vendor/ISA extensions.
+        // ELF_MIPS_ABIFlags_v0: require the precise ISA revision, GPR/FPR
+        // widths and floating-point convention without vendor/ISA extensions.
         if ordered_number(bytes, 0, 2, endian)? != 0
-            || bytes[2..8] != [32, 2, 1, 0, 0, 3]
+            || bytes[2..8] != expected
             || ordered_number(bytes, 8, 4, endian)? != 0
             || ordered_number(bytes, 12, 4, endian)? != 0
             // LLVM may set the defined ODDSPREG flag even for soft-float code;
@@ -1041,7 +1093,7 @@ fn verify_mips_attributes(
             || ordered_number(bytes, 20, 4, endian)? != 0
         {
             return Err(invalid(
-                "MIPS ABI flags do not match MIPS32r2 O32 soft-float",
+                "MIPS ABI flags do not match the selected release target",
             ));
         }
         found = true;
@@ -1068,6 +1120,10 @@ fn install_binary(executable: &Path, binary: &[u8]) -> Result<(), UpdateError> {
 }
 
 fn executable_digest(path: &Path) -> Result<[u8; 32], UpdateError> {
+    digest_file(open_executable(path)?)
+}
+
+fn open_executable(path: &Path) -> Result<fs::File, UpdateError> {
     let mut options = fs::OpenOptions::new();
     options.read(true);
     #[cfg(unix)]
@@ -1078,9 +1134,11 @@ fn executable_digest(path: &Path) -> Result<[u8; 32], UpdateError> {
     #[cfg(windows)]
     {
         use std::os::windows::fs::OpenOptionsExt;
-        options.custom_flags(0x0020_0000); // FILE_FLAG_OPEN_REPARSE_POINT
+        // Keep the snapshot handle compatible with another installer's normal
+        // replacement/cleanup: FILE_SHARE_READ | WRITE | DELETE.
+        options.custom_flags(0x0020_0000).share_mode(0x0000_0007);
     }
-    let mut file = options.open(path)?;
+    let file = options.open(path)?;
     let metadata = file.metadata()?;
     if !metadata.is_file() {
         return Err(invalid(
@@ -1094,6 +1152,10 @@ fn executable_digest(path: &Path) -> Result<[u8; 32], UpdateError> {
             return Err(invalid("update destination must not be a reparse point"));
         }
     }
+    Ok(file)
+}
+
+fn digest_file(mut file: fs::File) -> Result<[u8; 32], UpdateError> {
     let mut hash = Sha256::new();
     let mut buffer = [0u8; 65536];
     loop {
@@ -1431,6 +1493,21 @@ mod tests {
                 write_number(&mut bytes, 88, 4, 384, target.endian);
                 write_number(&mut bytes, 100, 4, 24, target.endian);
                 bytes[386..392].copy_from_slice(&[32, 2, 1, 0, 0, 3]);
+                write_number(&mut bytes, 400, 4, 1, target.endian);
+            }
+            ElfAbi::Mips64r2N64Hard | ElfAbi::Mips64r2N64Soft => {
+                write_number(&mut bytes, 48, 4, 0x80000007, target.endian);
+                write_number(&mut bytes, 56, 2, 2, target.endian);
+                write_number(&mut bytes, 120, 4, 0x70000003, target.endian);
+                write_number(&mut bytes, 128, 8, 384, target.endian);
+                write_number(&mut bytes, 152, 8, 24, target.endian);
+                bytes[386..392].copy_from_slice(
+                    if matches!(target.elf_abi, ElfAbi::Mips64r2N64Soft) {
+                        &[64, 2, 2, 0, 0, 3]
+                    } else {
+                        &[64, 2, 2, 2, 0, 1]
+                    },
+                );
                 write_number(&mut bytes, 400, 4, 1, target.endian);
             }
         }
@@ -1788,7 +1865,8 @@ mod tests {
         }
         for unknown in [
             "i586-unknown-linux-musl",
-            "mips64-unknown-linux-muslabi64",
+            "mips64-unknown-linux-gnuabi64",
+            "mipsisa64r6-unknown-linux-muslabi64",
             "unknown",
         ] {
             assert!(target_named(unknown).is_err());
@@ -1807,6 +1885,9 @@ mod tests {
             "powerpc64le-unknown-linux-musl",
             "mips-unknown-linux-musl",
             "mipsel-unknown-linux-musl",
+            "mips64-unknown-linux-muslabi64",
+            "mips64el-unknown-linux-muslabi64",
+            "mips64-openwrt-linux-musl",
         ] {
             let selected = target_named(name).unwrap();
             let original = elf(selected);
@@ -1950,6 +2031,137 @@ mod tests {
     }
 
     #[test]
+    fn mips64_requires_n64_hard_float_and_64_bit_program_header_offsets() {
+        for (name, o32) in [
+            ("mips64-unknown-linux-muslabi64", "mips-unknown-linux-musl"),
+            (
+                "mips64el-unknown-linux-muslabi64",
+                "mipsel-unknown-linux-musl",
+            ),
+        ] {
+            let selected = target_named(name).unwrap();
+            let original = elf(selected);
+            for flags1 in [0, 1] {
+                let mut binary = original.clone();
+                write_number(&mut binary, 400, 4, flags1, selected.endian);
+                assert!(verify_abi(&binary, selected).is_ok(), "{name}");
+            }
+            let o32 = target_named(o32).unwrap();
+            assert!(verify_abi(&elf(o32), selected).is_err());
+            assert!(verify_abi(&original, o32).is_err());
+            for flags in [
+                0x60000007, // MIPS64 revision 1.
+                0x70000007, // MIPS32r2, despite an ELF64 header.
+                0xa0000007, // MIPS64 revision 6.
+                0x80001007, // O32.
+                0x80002007, // O64.
+                0x80000027, // N32 (EF_MIPS_ABI2).
+                0x80000047, // ABI_ON32.
+                0x80000107, // 32-bit register mode.
+                0x80000207, // O32 FP64 convention.
+                0x80000407, // NaN2008.
+                0x82000007, // microMIPS.
+                0x80810007, // Processor-specific instructions.
+            ] {
+                let mut binary = original.clone();
+                write_number(&mut binary, 48, 4, flags, selected.endian);
+                assert!(verify_abi(&binary, selected).is_err(), "{name} {flags:x}");
+            }
+            for (offset, value) in [
+                (384, 1),  // Unsupported ABI flags version.
+                (386, 32), // ISA level.
+                (387, 6),  // ISA revision.
+                (388, 1),  // GPR width.
+                (389, 0),  // No FPU registers.
+                (389, 1),  // 32-bit FPU registers.
+                (390, 1),  // Coprocessor 2 registers.
+                (391, 0),  // Unspecified floating-point ABI.
+                (391, 2),  // Single-float ABI.
+                (391, 3),  // Soft-float ABI.
+            ] {
+                let mut binary = original.clone();
+                binary[offset] = value;
+                assert!(
+                    verify_abi(&binary, selected).is_err(),
+                    "{name} byte {offset}"
+                );
+            }
+            for (offset, width, value) in [
+                (392, 4, 1),
+                (396, 4, 1),
+                (400, 4, 2),
+                (404, 4, 1),
+                (120, 4, 1), // Missing PT_MIPS_ABIFLAGS.
+                (128, 8, u64::MAX),
+                (128, 8, 1 << 32), // Must not truncate a 64-bit file offset.
+                (152, 8, 23),
+                (152, 8, 25),
+                (152, 8, 1 << 32 | 24), // Must not truncate a 64-bit size.
+            ] {
+                let mut binary = original.clone();
+                write_number(&mut binary, offset, width, value, selected.endian);
+                assert!(
+                    verify_abi(&binary, selected).is_err(),
+                    "{name} field {offset}"
+                );
+            }
+            let mut duplicate = original.clone();
+            write_number(&mut duplicate, 56, 2, 3, selected.endian);
+            write_number(&mut duplicate, 176, 4, 0x70000003, selected.endian);
+            write_number(&mut duplicate, 184, 8, 384, selected.endian);
+            write_number(&mut duplicate, 208, 8, 24, selected.endian);
+            assert!(verify_abi(&duplicate, selected).is_err());
+        }
+    }
+
+    #[test]
+    fn mips64_openwrt_soft_float_is_not_interchangeable_with_hard_float_or_o32() {
+        let soft = target_named("mips64-openwrt-linux-musl").unwrap();
+        let hard = target_named("mips64-unknown-linux-muslabi64").unwrap();
+        let o32 = target_named("mips-unknown-linux-musl").unwrap();
+        let original = elf(soft);
+        assert!(verify_abi(&original, soft).is_ok());
+        assert!(verify_abi(&original, hard).is_err());
+        assert!(verify_abi(&elf(hard), soft).is_err());
+        assert!(verify_abi(&original, o32).is_err());
+        assert!(verify_abi(&elf(o32), soft).is_err());
+        for flags1 in [0, 1] {
+            let mut binary = original.clone();
+            write_number(&mut binary, 400, 4, flags1, soft.endian);
+            assert!(verify_abi(&binary, soft).is_ok());
+        }
+        for flags in [
+            0x70000007, 0xa0000007, 0x80001007, 0x80000027, 0x80000047, 0x80000107, 0x80000207,
+            0x80000407, 0x82000007, 0x80810007,
+        ] {
+            let mut binary = original.clone();
+            write_number(&mut binary, 48, 4, flags, soft.endian);
+            assert!(verify_abi(&binary, soft).is_err(), "flags {flags:x}");
+        }
+        for (offset, value) in [
+            (384, 1),
+            (386, 32),
+            (387, 6),
+            (388, 1), // N64 always uses 64-bit GPRs, including soft-float.
+            (389, 1), // FPRs must be absent, not just a soft fp_abi marker.
+            (389, 2),
+            (390, 1),
+            (391, 0),
+            (391, 1), // Hard-float.
+            (391, 2), // Single-float.
+        ] {
+            let mut binary = original.clone();
+            binary[offset] = value;
+            assert!(verify_abi(&binary, soft).is_err(), "byte {offset}");
+        }
+        for offset in [392, 396, 400, 404] {
+            let mut binary = original.clone();
+            write_number(&mut binary, offset, 4, 2, soft.endian);
+            assert!(verify_abi(&binary, soft).is_err(), "field {offset}");
+        }
+    }
+
+    #[test]
     fn pe_offsets_are_bounded_before_arithmetic_on_32_bit_hosts() {
         let selected = target_named("x86_64-pc-windows-msvc").unwrap();
         let mut original = vec![0; 90];
@@ -2030,9 +2242,15 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let executable = directory.path().join("core");
         fs::write(&executable, b"original core").unwrap();
-        let prepared_digest = executable_digest(&executable).unwrap();
+        let original = open_executable(&executable).unwrap();
 
         install_binary(&executable, b"newer update from another installer").unwrap();
+        // Hashing after the request must still read the image opened before
+        // the other installer replaced its pathname, on Windows as on Unix.
+        let prepared_digest = digest_file(original).unwrap();
+        let original_digest: [u8; 32] = Sha256::digest(b"original core").into();
+        assert_eq!(prepared_digest, original_digest);
+        assert_ne!(prepared_digest, executable_digest(&executable).unwrap());
         let metadata = fs::symlink_metadata(&executable).unwrap();
         let gate = install_lock(&executable, &metadata).unwrap();
         let busy = install_checked(

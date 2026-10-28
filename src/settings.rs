@@ -538,6 +538,7 @@ impl Settings {
             "hooks",
             "portal",
             "retry",
+            "log",
             "data",
             "data.response_identity",
             "data.response_md5_challenge",
@@ -642,18 +643,19 @@ impl Settings {
             }
             settings.ip = Some(ip);
         }
-        settings.username = text(matches, cfg, "username")?.unwrap_or_default();
-        if !settings.logoff && settings.username.trim().is_empty() {
-            return Err("Username is REQUIRED; fill the configuration file".into());
-        }
-        if !settings.logoff && !valid_credential(&settings.username) {
-            return Err(
-                "Invalid username: expected one nonempty UTF-8 line of at most 4096 bytes".into(),
-            );
-        }
         // Logout does not require account credentials. In particular, a portal
-        // logout must not read an unrelated configured password file or stdin.
+        // logout must not inspect an unrelated account, password file or stdin.
         if !settings.logoff {
+            settings.username = text(matches, cfg, "username")?.unwrap_or_default();
+            if settings.username.trim().is_empty() {
+                return Err("Username is REQUIRED; fill the configuration file".into());
+            }
+            if !valid_credential(&settings.username) {
+                return Err(
+                    "Invalid username: expected one nonempty UTF-8 line of at most 4096 bytes"
+                        .into(),
+                );
+            }
             settings.password = if matches.get_flag("password-stdin") {
                 if std::io::stdin().is_terminal() {
                     return Err("--password-stdin requires redirected standard input".into());
@@ -1230,6 +1232,8 @@ mod tests {
         for extra in [
             "heartbeat: 5",
             "retry: false",
+            "log: false",
+            "log: INFO",
             "data: bad",
             "data: {misc_info: false}",
         ] {
@@ -1379,6 +1383,21 @@ mod tests {
                     .unwrap_err()
                     .starts_with("Invalid username:")
             );
+        }
+    }
+
+    #[test]
+    fn logout_does_not_validate_or_read_unrelated_login_credentials() {
+        for yaml in [
+            "username: [not, a, login]\npassword: false\npassword_file: 42\n".to_owned(),
+            format!(
+                "username: {}\npassword_file: /not/a/password\n",
+                "u".repeat(80)
+            ),
+        ] {
+            let settings = parse(&yaml, &["--logoff", "--password-stdin"]).unwrap();
+            assert!(settings.username.is_empty() && settings.password.is_empty());
+            assert!(parse(&yaml, &["--check-config"]).is_err());
         }
     }
 

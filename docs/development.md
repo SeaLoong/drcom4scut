@@ -2,7 +2,7 @@
 
 [返回首页](../README.md)
 
-使用客户端请从[下载安装](download.md)或[图形界面](https://github.com/SeaLoong/drcom4scutGUI#readme)开始。本页面向希望修改源码、自己构建程序或维护发布的人；开发命令均在源码仓库根目录执行。
+使用客户端请从[安装指南](download.md)或[图形界面](https://github.com/SeaLoong/drcom4scutGUI#readme)开始。本页面向希望修改源码、自己构建程序或维护发布的人；开发命令均在源码仓库根目录执行。
 
 | 你的目标 | 从这里开始 |
 | --- | --- |
@@ -15,6 +15,8 @@
 本页几个常用词：**构建/编译**是把源码变成可运行程序；**依赖**是使用的第三方库；**CI** 是 GitHub 自动运行的检查；**交叉构建**是在一台电脑上生成给另一种处理器或系统使用的程序；**模拟测试**使用自建的假服务器检查逻辑，不会真的登录学校网络。
 
 使用 `rust-toolchain.toml` 指定的稳定版 Rust，最低版本见 `Cargo.toml` 的 `rust-version`（当前为 1.99）。`Cargo.lock` 固定第三方库版本，普通命令添加 `--locked` 是为了按已审查的版本构建，避免悄悄更换依赖。维护依赖时同步提交这个文件。协作约定见 [AGENTS.md](https://github.com/SeaLoong/drcom4scut/blob/master/AGENTS.md)。
+
+Unix 依赖 `libc` 暂精确固定为 `=0.2.189`：0.2.190 / 0.2.191 遗漏 MIPS64 的 Linux UAPI 常量选择，导致真实 socket 绑定失败。官方[修复提交](https://github.com/rust-lang/libc/commit/299afed2a7c01abf8eebeee36b0655d49b811c79)目前位于 1.0 alpha，尚未回移至 0.2。此固定值用于避开已复现的兼容回归，升级前须核对回移结果并重跑各目标的 socket、TLS、完整/精简及更新测试；依赖安全审计继续启用，平台结果以对应源码的最终 CI 为准。
 
 ## 本机构建与检查
 
@@ -46,10 +48,11 @@ macOS 使用 Xcode Command Line Tools 提供的系统 SDK 和链接器；抓包�
 | --- | --- | --- |
 | 默认 | 无附加参数 | 文件日志、有线 EAP/UDP、HTTP 与 HTTPS Portal |
 | 精简 | `--no-default-features` | 有线 EAP/UDP、控制台日志 |
+| 仅 HTTP 门户 | `--no-default-features --features portal` | 有线 EAP/UDP、HTTP Portal、控制台日志；不接受 HTTPS Portal |
 | 路由器 | `--no-default-features --features log4rs,portal-tls` | 文件日志、有线认证、HTTP 与 HTTPS Portal |
 | HTTPS 门户 | `--features portal-tls` | 启用 `portal` 及证书校验；交叉编译需匹配的 TLS C/汇编工具链 |
 
-HTTP 是未加密的网页请求，HTTPS 使用 TLS 加密并检查网站证书。HTTPS 入口需要启用 `portal-tls`，以保持加密传输和证书检查。`log4rs` 只启用实际使用的日志 appender/编码/滚动功能，不需要其 YAML 配置解析器。
+HTTP 是未加密的网页请求，HTTPS 使用 TLS 加密并检查网站证书。HTTPS 入口需要启用 `portal-tls`，以保持加密传输和证书检查；各组合仍保留核心更新所需的 HTTPS 支持。`log4rs` 只启用实际使用的日志 appender/编码/滚动功能，不需要其 YAML 配置解析器。
 
 ## 模块与运行模型
 
@@ -58,9 +61,11 @@ HTTP 是未加密的网页请求，HTTPS 使用 TLS 加密并检查网站证书�
 - `settings` 解析 CLI/YAML、密码源、模式和报文字段；`main` 提供检查、管理命令与退出信号入口。
 - `client` 统一管理认证会话、网卡变化、退避、状态、hooks 和清理。EAP 与 UDP 由各自的 Tokio future 持有状态，`watch` 保留最近授权结果，UDP 完成握手后才上报完整在线。
 - `device` 隔离抓包接口。Unix 将 pnet 阻塞收发放在有限超时的适配层；macOS BPF 使用非阻塞描述符和有界等待，取消中的读取保留复用。Windows 使用非阻塞 pcap，并通过原生 IP Helper 枚举网卡，使列举与 Portal 不依赖捕获驱动。
-- `socket` 为 DNS/UDP 选择真实本地 IPv4 和出口接口，macOS 使用 `IP_BOUND_IF` 约束出口。载荷里的 `eap_ip` / `udp_ip` 与实际源地址分离。未固定 `ip` 的会话周期检查地址变化。
+- `socket` 为 DNS/UDP 选择真实本地 IPv4 和出口接口，macOS 使用 `IP_BOUND_IF` 约束出口。DNS 的 UDP 响应截断时，TCP 回退保留相同服务器、端口及源绑定。载荷里的 `eap_ip` / `udp_ip` 与实际源地址分离。未固定 `ip` 的会话周期检查地址变化。
 - `portal` 处理显式选择的 ePortal 接入、同主机约束、响应解析和在线会话确认。`control` 提供 Windows 私有命名管道和 Unix 私有 socket 的 GUI 停止通道，停止请求与父进程 EOF 均进入有界清理；`service` 仅对接 Windows SCM。
 - `update` 检查最新正式版、校验下载并替换当前核心；`update_schedule` 为整个连接生命周期保留一次自动检查计时，重连沿用原来的计时。
+
+`status` 和 `logs` 只接受普通文件，Unix 打开时使用非阻塞标记并在打开后再次核对类型，避免路径被替换为 FIFO 后挂起。状态上限为 16 KiB；日志仅读取末尾 1 MiB，保留完整尾行并最多输出 200 行。显式 `--logoff` 的设置加载跳过用户名与密码字段，配置检查仍验证注销实际需要的网络参数。
 
 有线 `legacy` 与 `windows31` 共用 EAP Start、Identity、MD5、Success 的基本过程；后者改变部分扩展字段和 MiscInfo，并增加一次 UDP 启动心跳确认。Identity 扩展仍相同，周期心跳相同。报文参数与依据分别见[配置参考](configuration.md#有线报文兼容选项)及[客户端参考](references-clients.md)。
 
@@ -83,6 +88,8 @@ HTTP 是未加密的网页请求，HTTPS 使用 TLS 加密并检查网站证书�
 
 测试报告分别记录通过、跳过及未运行项。原生行为由对应平台 runner 检查，校园交换机、抓包权限、路由器和长期在线能力则通过真实环境验证。
 
+2026-10-28，在同一主机、相同 debug 构建配置和 256 MiB 稀疏日志输入下，`logs` 命令修复前后的峰值 RSS 分别为 271740 / 10588 KiB，单次耗时为 0.263 / 0.014 秒。该测量用于核对尾读的内存收益；输入是合成的大文件，日常滚动日志、发布优化和不同设备的结果应另行测量。
+
 并发测试通过门闩或虚拟时钟安排事件，不依赖主机在几毫秒内调度。ARMv5 测试不得假设存在 64 位原子。跨架构时 `CARGO_TARGET_*_RUNNER` 只启动测试主程序，CLI 子进程另需 `DRCOM_TEST_RUNNER`。
 
 独立脚本检查可在仓库根目录运行：
@@ -100,9 +107,9 @@ powershell -NoProfile -NonInteractive -File scripts/test-service-acl.ps1
 
 ## OpenWrt 交叉构建
 
-如果只是给路由器安装客户端，使用[现成下载包](openwrt.md)即可。以下步骤供需要自编译的人使用；目标名称同时限定处理器、系统及程序调用方式，请按目标设备选择。
+如果只是给路由器安装客户端，按[路由器安装指南](openwrt.md)使用现成包即可。以下步骤供需要自编译的人使用；目标名称同时限定处理器、系统及程序调用方式，请按目标设备选择。
 
-当前发布平台和特性以 [platforms.json](https://github.com/SeaLoong/drcom4scut/blob/master/.github/scripts/platforms.json) 为准。除 MIPS/MIPSel 需从已校验源码准备目标标准库外，静态路由器产物使用 Rust 分发中的 self-contained musl 和 `rust-lld`；例如 ARMv7：
+当前发布平台和特性以 [platforms.json](https://github.com/SeaLoong/drcom4scut/blob/master/.github/scripts/platforms.json) 为准。除 MIPS32/MIPS64 系列需从已校验源码准备目标标准库外，静态路由器产物使用 Rust 分发中的 self-contained musl 和 `rust-lld`；例如 ARMv7：
 
 ```sh
 rustup target add armv7-unknown-linux-musleabi
@@ -117,7 +124,7 @@ CC=clang AR=llvm-ar RUSTFLAGS='-C linker=rust-lld -C target-feature=+crt-static'
 python3 .github/scripts/package_release.py armv7-unknown-linux-musleabi --runner qemu-arm
 ```
 
-安装对应 QEMU user-mode 程序后执行测试。桌面 GNU Linux、Windows、macOS 的 x64/ARM64 目标使用匹配架构的原生 runner；静态 x64/ARM64 也在对应 Linux runner 上执行，其他交叉目标通过清单指定的 QEMU 程序和 CPU 型号执行。当前源码矩阵覆盖 14 个静态路由器目标，六种桌面 GUI 一体包仍只使用原来的桌面核心目标。QEMU 通过不能证明特定固件、设备网卡或校园网已验证。
+安装对应 QEMU user-mode 程序后执行测试。桌面 GNU Linux、Windows、macOS 的 x64/ARM64 目标使用匹配架构的原生 runner；静态 x64/ARM64 也在对应 Linux runner 上执行，其他交叉目标通过清单指定的 QEMU 程序和 CPU 型号执行。静态路由器目标范围见[平台表](platform-support.md#源码构建矩阵与下载范围)，六种桌面 GUI 一体包仍只使用原来的桌面核心目标。QEMU 通过不能证明特定固件、设备网卡或校园网已验证。
 
 `router` 配置优化完整路由器包的体积，程序生成在 `target/<目标>/router/`，打包器按平台清单选取相同配置。它保留日志、Portal 和 HTTPS 更新能力。CPU/运行库差异、静态与 SDK 动态包的取舍，以及 MIPS/MIPSel 所需工具链和验证步骤见[平台支持说明](platform-support.md)。
 
@@ -130,6 +137,9 @@ rustup toolchain install 1.99.1 --profile minimal
 python3 .github/scripts/setup_mips_toolchain.py \
   --target mips-unknown-linux-musl --work-dir target/mips-work \
   --prefix target/mips-tools --jobs 2
+python3 .github/scripts/setup_qemu.py --emulator qemu-mips \
+  --prefix target/qemu-tools --download-dir target/qemu-downloads
+export PATH="$PWD/target/qemu-tools:$PATH"
 export RUSTUP_TOOLCHAIN=drcom-mips-1.99.1
 export CC_mips_unknown_linux_musl="$PWD/target/mips-tools/bin/mips-linux-musl-gcc"
 export AR_mips_unknown_linux_musl=llvm-ar
@@ -153,7 +163,19 @@ python3 .github/scripts/package_release.py mips-unknown-linux-musl \
 
 小端构建将目标改为 `mipsel-unknown-linux-musl`，使用 `drcom-mipsel-1.99.1`、`mipsel-linux-musl-gcc`、`CC_mipsel_unknown_linux_musl` / `AR_mipsel_unknown_linux_musl`、`CARGO_TARGET_MIPSEL_UNKNOWN_LINUX_MUSL_RUNNER` 和 `qemu-mipsel`；建议使用独立工作目录。脚本也会在工作目录写出 `environment-mips.json` 或 `environment-mipsel.json`，记录准确的工具链与编译器路径；CI 通过 `--github-env` 激活这些值。
 
-这条路线不要求 nightly 或应用级 `RUSTC_BOOTSTRAP`。构建后仍须通过大小端、O32、MIPS32r2 和软浮点 ABI 检查；QEMU 结果与实机 OpenWrt、校园网结果分别记录。完成此类构建后，在其他 shell 使用常规稳定版，或先 `unset RUSTUP_TOOLCHAIN`。
+三个 MIPS64r2 N64 目标也使用同一准备脚本和命令流程，替换下表中的值，并分别使用独立的工作目录、安装前缀和目标 runner：
+
+| 目标 | 自定义工具链 | C 编译器包装器 | QEMU 与 CPU |
+| --- | --- | --- | --- |
+| `mips64-unknown-linux-muslabi64` | `drcom-mips64-1.99.1` | `mips64-linux-musl-gcc` | `qemu-mips64 -cpu MIPS64R2-generic` |
+| `mips64el-unknown-linux-muslabi64` | `drcom-mips64el-1.99.1` | `mips64el-linux-musl-gcc` | `qemu-mips64el -cpu MIPS64R2-generic` |
+| `mips64-openwrt-linux-musl` | `drcom-mips64-openwrt-1.99.1` | `mips64-openwrt-linux-musl-gcc` | `qemu-mips64 -cpu Octeon68XX` |
+
+例如大端硬浮点目标设置 `CC_mips64_unknown_linux_muslabi64`、`AR_mips64_unknown_linux_muslabi64` 和 `CARGO_TARGET_MIPS64_UNKNOWN_LINUX_MUSLABI64_RUNNER`。其他目标同样将连字符替换为下划线；runner 变量中的目标名需大写。脚本分别写出 `environment-mips64.json`、`environment-mips64el.json` 或 `environment-mips64-openwrt.json`，记录全部环境值；CI 使用 `--github-env` 导入。
+
+大端 MIPS32/MIPS64 与 PowerPC64 在 Ubuntu 24.04 上需使用固定、校验过的 QEMU 10.0.13，避免系统 QEMU 8.2 的跨端序 netlink 问题；准备 MIPS64 runner 时，将上述 `setup_qemu.py` 的参数改为 `--emulator qemu-mips64`。小端 MIPS64 已在 Ubuntu 的 QEMU 8.2.2 上通过完整与精简测试。硬浮点目标的 C ABI 为 `-march=mips64r2 -mabi=64 -mhard-float`，软浮点为 `-march=mips64r2 -mabi=64 -msoft-float`，不得混用其标准库或 libc。
+
+这条路线不要求 nightly 或应用级 `RUSTC_BOOTSTRAP`。构建后仍须通过大小端、O32/N64、MIPS32r2/MIPS64r2 和浮点 ABI 检查；QEMU 结果与实机 OpenWrt、校园网结果分别记录。完成此类构建后，在其他 shell 使用常规稳定版，或先 `unset RUSTUP_TOOLCHAIN`。
 
 ## LuCI 页面包
 
@@ -171,7 +193,7 @@ SDK 按其发行版生成 `.ipk` 或 `.apk`。该包只包含 JS、Shell、JSON 
 
 修改代码后，GitHub 会自动检查格式、代码问题、测试及各平台构建。打包步骤还会确认“文件名说给哪种电脑使用，里面就确实是哪种程序”，并生成供下载者核对的校验值。
 
-[Rust CI](https://github.com/SeaLoong/drcom4scut/blob/master/.github/workflows/rust.yml) 在推送到 `master`、提交 PR 或手动运行时调用[共用验证工作流](https://github.com/SeaLoong/drcom4scut/blob/master/.github/workflows/validate-build.yml)；仅修改 `site/` 或 Pages 工作流的推送与 PR 由网站流程检查，随软件打包的 `docs/` 修改仍执行 Rust CI。它运行格式、两组严格 Clippy、默认/精简及目标特性测试、平台构建和脚本回归。源码清单包含六个桌面目标和十四个静态路由器目标，共二十个；runner、模拟器和 Npcap 库架构在同一清单中明确声明。
+[Rust CI](https://github.com/SeaLoong/drcom4scut/blob/master/.github/workflows/rust.yml) 在推送到 `master`、提交 PR 或手动运行时调用[共用验证工作流](https://github.com/SeaLoong/drcom4scut/blob/master/.github/workflows/validate-build.yml)；仅修改 `site/` 或 Pages 工作流的推送与 PR 由网站流程检查，随软件打包的 `docs/` 修改仍执行 Rust CI。它运行格式、全部特性/精简/仅 HTTP Portal 三组严格 Clippy 及相应测试、平台构建和脚本回归。桌面与静态路由器目标、runner、模拟器和 Npcap 库架构均由同一平台清单明确声明，当前数量与 ABI 见[平台说明](platform-support.md#源码构建矩阵与下载范围)。
 
 平台清单同时驱动构建矩阵、[打包器](https://github.com/SeaLoong/drcom4scut/blob/master/.github/scripts/package_release.py)和[发布完整性检查](https://github.com/SeaLoong/drcom4scut/blob/master/.github/scripts/verify_release.py)。Cargo 命令显式指定 target，打包前核对 ELF/PE/Mach-O、CPU、位宽、端序、静态属性、ARM 基线/ABI 和实际版本。包内包含程序、配置示例、文档、许可证及相应 OpenWrt 资源，并生成 SHA-256。`BUILD-INFO.json` 记录源码版本、提交、工作区状态和目标平台，汇总发布时再次核对。
 
@@ -197,7 +219,9 @@ Preview 是给使用者试用最新代码的开发预览，正式版 Release 仍
 2. 在 GitHub 打开 **Actions → Manual release → Run workflow**，选择待发布的分支，填写与 `Cargo.toml` 版本一致的标签，如 `v0.6.1`。
 3. `draft` 默认开启。保留它会创建草稿；取消后会直接发布。
 
-工作流重新执行共用验证、按上文相同规则选择另一仓库的最新公开版本，生成并检查六种桌面一体包及其余平台包与校验和，核对最终标签仍指向已验证提交，然后上传到草稿。全部远端文件核验完成后，按 `draft` 选项保留草稿或公开发布。它拒绝覆盖其他提交的标签及既有 Release。只有最终发布 job 有写权限。正式发布仅接受手动触发，普通 Git 推送只会按上述条件自动创建 Preview。
+工作流重新执行共用验证、按上文相同规则选择另一仓库的最新公开版本，生成并检查六种桌面一体包及其余平台包与校验和，核对最终标签仍指向已验证提交，然后上传到草稿。全部远端文件核验完成后，按 `draft` 选项保留草稿或公开发布。它拒绝覆盖其他提交的标签及已公开 Release。只有最终发布 job 有写权限。正式发布仅接受手动触发，普通 Git 推送只会按上述条件自动创建 Preview。
+
+上传中断时，可在原运行选择 **Re-run failed jobs**，复用已验证的同一批产物。发布器只向仓库、标签、完整源码 SHA、版本及预发布状态均相符的私有草稿补传缺失文件；既有附件必须全部满足预期名称、大小和 SHA-256，不覆盖或删除附件。完整草稿也可在核验后公开。重新构建后的文件即使来自同一源码，也可能有不同摘要；已公开版本、未知附件、摘要不符或仍在上传的附件都会拒绝自动续传，需要先人工核查。
 
 来源快照、许可证和协议证据见[派生仓库记录](references-forks.md)与[相关客户端记录](references-clients.md)。新增兼容行为应附独立报文样本或可重复的协议测试，并明确实机验证范围。
 
@@ -205,7 +229,7 @@ Preview 是给使用者试用最新代码的开发预览，正式版 Release 仍
 
 用户操作见[更新指南](update.md)。核心直接选择当前构建目标的最新正式版，手动检查和安装只读取更新配置，不要求认证配置或校园密码，也不生成配置模板。检查信息、归档及 `SHA256SUMS` 共用指定的 HTTPS 代理，默认 `https://gh-proxy.com/`；精简和路由器构建也包含更新所需的 HTTPS 支持。
 
-安装前核对发布文件摘要、校验清单、构建来源和二进制系统架构，拒绝越界路径、链接和特殊文件，只取出当前核心可执行文件。安装在同目录暂存并替换，保留 Unix 模式、所有者及 Linux capabilities；失败时还原原文件。摘要和校验清单用于核对数据一致性，目前没有独立发布签名，更新代理属于信任范围。
+安装前核对发布文件摘要、校验清单、构建来源和二进制系统架构，拒绝越界路径、链接和特殊文件，只取出当前核心可执行文件。安装在同目录暂存并替换，保留 Unix 模式、所有者及 Linux capabilities；失败时还原原文件。同目录的 `.drcom-update.lock` 与 GUI 共用，锁覆盖版本复查、替换、验证及回滚，避免并发安装互相覆盖。摘要和校验清单用于核对数据一致性，目前没有独立发布签名，更新代理属于信任范围。
 
 自动检查在所选连接模式完整在线后开始计时，使用 GUI 私有控制通道时由 GUI 统一管理。测试覆盖本地模拟下载、错误校验值、恶意归档、实际运行文件的替换与回滚，以及重连、仅 EAP 和 Portal 的计时；平台工作流另用本次原生发布归档验证安装。模拟更新测试不证明校园认证或目标设备的授权行为。
 
@@ -230,4 +254,6 @@ npm run preview
 
 图形界面放在其他目录时，用 `GUI_DOCS_DIR=/完整路径/drcom4scutGUI` 指定。构建结果为 `site/.vitepress/dist`；构建自动检查文档转换、生成页面的本地链接、图片和标题锚点。浏览器检查覆盖搜索、慢加载入口、手机导航、主题切换、深链接、更新帮助入口和截图展示，Pages 发布前也会执行。本地搜索随静态页面发布，用户输入的搜索词留在浏览器。
 
-VitePress 当前稳定版搭配固定的 Vite 6.4.5 安全修复版本，锁文件保存确切依赖。维护时执行 `npm audit --prefix site`，并同时验证构建、导航和搜索。[Website and help](https://github.com/SeaLoong/drcom4scut/actions/workflows/pages.yml) 在推送时构建页面，PR 只检查构建；master 或手动运行可部署。[Dependency audit](https://github.com/SeaLoong/drcom4scut/actions/workflows/dependency-audit.yml) 每周检查已锁定依赖；正式发布软件仍使用前述手动流程。
+站点锁定 VitePress 1.6.4 和 Vite 6.4.5，锁文件保存确切依赖。维护时在仓库根目录执行 `npm audit --prefix site`，并同时验证构建、导航和搜索。[Website and help](https://github.com/SeaLoong/drcom4scut/actions/workflows/pages.yml) 对推送和 PR 执行依赖审计、构建、链接与浏览器检查；上游 master 或对 master 的手动运行可部署。[Dependency audit](https://github.com/SeaLoong/drcom4scut/actions/workflows/dependency-audit.yml) 每周检查已锁定依赖；正式发布软件仍使用前述手动流程。
+
+Linux x64 CI 的 Rust 依赖审计使用 RustSec 官方 `cargo-audit 0.22.2` 预编译工具包；准备脚本固定下载地址、大小和 SHA-256，每次使用时重新核对归档与工具版本，再执行 `cargo audit --deny warnings`。
