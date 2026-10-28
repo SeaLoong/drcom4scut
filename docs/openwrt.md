@@ -4,7 +4,7 @@
 
 本页适合希望由 **OpenWrt 路由器**持续进行校园网认证的用户。电脑用户可直接使用[图形界面](https://github.com/SeaLoong/drcom4scutGUI)。
 
-下载包已包含可运行的认证程序和后台启动脚本，不用在路由器安装 Rust。路由器仍需先接好学校网线，完成自己的网络地址设置。网页管理页（LuCI）是可选的，安装认证程序后再添加即可。
+路由器包只包含 Rust 认证核心、procd 后台脚本和可选 LuCI 管理资源，不安装桌面 GUI 或 .NET，也不用在路由器安装 Rust。路由器仍需先接好学校网线，完成自己的网络地址设置。网页管理页（LuCI）是可选的，安装认证程序后再添加即可。
 
 ![OpenWrt 终端实际运行系统、客户端版本、网卡和配置检查](images/openwrt-cli-check.png)
 
@@ -20,19 +20,29 @@ uname -m
 opkg print-architecture
 ```
 
-这些命令显示设备型号、处理器类型和系统支持的软件包类型。使用 `apk` 管理软件的固件，将最后一条换成 `apk --print-arch`。按输出和设备规格确认后，从[下载页](https://github.com/SeaLoong/drcom4scut/releases/latest)的最新正式版选择以下 `.tar.gz` 包，文件名中包含对应版本号。
+这些命令显示设备型号、处理器类型和系统支持的软件包类型。使用 `apk` 管理软件的固件，将最后一条换成 `apk --print-arch`。按输出和设备规格确认后，从[下载页](https://github.com/SeaLoong/drcom4scut/releases/latest)选择匹配的 `.tar.gz` 包，文件名中包含对应版本号。下表是当前源码构建矩阵，新增目标需等相应版本发布；最新正式版是否提供该包，以实际附件为准。
 
 | 文件名中的这段文字 | 适用设备 |
 | --- | --- |
-| `x86_64-unknown-linux-musl` | 使用 x86-64 处理器的软路由 |
-| `aarch64-unknown-linux-musl` | ARM64 路由器 |
-| `armv7-unknown-linux-musleabi` | ARMv7，采用 soft-float 运行约定 |
-| `armv5te-unknown-linux-musleabi` | 支持 ARMv5TE 指令的设备 |
-| `riscv64gc-unknown-linux-musl` | 支持 GC 扩展的 64 位 RISC-V 设备 |
+| `x86_64-unknown-linux-musl` | x86-64 |
+| `i686-unknown-linux-musl` | 32 位 x86，需 SSE2；不代表仅支持 i586 的旧 CPU |
+| `aarch64-unknown-linux-musl` | ARM64 |
+| `armv5te-unknown-linux-musleabi` | ARMv5TE，软浮点 ABI |
+| `arm-unknown-linux-musleabi` | ARMv6，软浮点 ABI |
+| `arm-unknown-linux-musleabihf` | ARMv6，VFP、硬浮点 ABI |
+| `armv7-unknown-linux-musleabi` | ARMv7，软浮点 ABI |
+| `armv7-unknown-linux-musleabihf` | ARMv7-A，VFPv3-D16、硬浮点 ABI |
+| `riscv64gc-unknown-linux-musl` | 64 位 RISC-V，GC 扩展 |
+| `loongarch64-unknown-linux-musl` | LoongArch64，LP64D ABI、LSX |
+| `powerpc64-unknown-linux-musl` | 64 位 PowerPC，大端、ELFv2 ABI |
+| `powerpc64le-unknown-linux-musl` | 64 位 PowerPC，小端、ELFv2 ABI |
+| `mips-unknown-linux-musl` | MIPS32r2，大端、O32 软浮点 ABI |
+| `mipsel-unknown-linux-musl` | MIPS32r2，小端、O32 软浮点 ABI |
 
-当前提供上表五类处理器的包。ARMv5 设备选择 ARMv5TE 包，RISC-V 设备需支持 GC 指令扩展。选择时一并核对设备规格和固件；需要帮助时提供上述命令输出与设备型号。
+当前源码覆盖上述 14 个静态路由器目标。选择时核对设备的指令集、字节序、浮点 ABI 和内核，不能只凭 `uname -m`。例如 MIPS 与 MIPSel 大小端不同，PowerPC64 包要求 ELFv2，ARM 硬浮点包需要对应 VFP 能力，i686 包需要 SSE2。需要帮助时提供设备型号与上述命令输出，并去掉个人信息。
 
-MIPS/MIPSel 尚无发布包，接入需要匹配的 Rust 标准库、OpenWrt 工具链和大小端/ABI 校验。开发计划与设备信息清单见[平台支持与路由器构建](platform-support.md#mips-与-mipsel-的接入计划)。现有路由器构建使用保留功能的体积优化，仍包含 TLS、证书校验和在线更新；空间有限时，应同时核对解压后大小和运行内存，不能只比较压缩包。
+构建采用保留日志、Portal、TLS、证书校验和在线更新能力的 `router` 体积优化。MIPS 稳定工具链与各平台边界见[平台支持与路由器构建](platform-support.md)。模拟器测试不能替代具体固件和校园网实机验证；空间有限时还要核对解压大小和运行内存。
+
 
 ## 安装与账号配置
 

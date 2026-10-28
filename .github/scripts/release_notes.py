@@ -13,10 +13,19 @@ LABELS = {
     "osx-x64": "macOS · Intel", "osx-arm64": "macOS · Apple 芯片",
     "linux-x64": "Linux · Intel / AMD 64 位", "linux-arm64": "Linux · ARM64",
     "x86_64-unknown-linux-musl": "OpenWrt · x86-64",
+    "i686-unknown-linux-musl": "OpenWrt · x86 32 位（i686，需 SSE2）",
     "aarch64-unknown-linux-musl": "OpenWrt · ARM64",
     "armv5te-unknown-linux-musleabi": "OpenWrt · ARMv5TE（软浮点）",
+    "arm-unknown-linux-musleabi": "OpenWrt · ARMv6（软浮点）",
+    "arm-unknown-linux-musleabihf": "OpenWrt · ARMv6（硬浮点）",
     "armv7-unknown-linux-musleabi": "OpenWrt · ARMv7（软浮点）",
+    "armv7-unknown-linux-musleabihf": "OpenWrt · ARMv7（硬浮点）",
     "riscv64gc-unknown-linux-musl": "OpenWrt · RISC-V 64 位",
+    "loongarch64-unknown-linux-musl": "OpenWrt · LoongArch64（LP64D、LSX）",
+    "powerpc64-unknown-linux-musl": "OpenWrt · PowerPC64（大端、ELFv2）",
+    "powerpc64le-unknown-linux-musl": "OpenWrt · PowerPC64（小端、ELFv2）",
+    "mips-unknown-linux-musl": "OpenWrt · MIPS32r2（大端、O32 软浮点）",
+    "mipsel-unknown-linux-musl": "OpenWrt · MIPS32r2（小端、O32 软浮点）",
 }
 
 

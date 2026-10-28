@@ -11,7 +11,7 @@
 
 ## 选一种适合你的用法
 
-电脑上推荐使用 **[drcom4scutGUI 图形界面](https://github.com/SeaLoong/drcom4scutGUI)**：填写账号、选择网卡，点击“连接”即可。桌面一体包已包含图形界面和命令行程序，解压后可以选择任一种操作方式；路由器使用包含 LuCI 管理页的 OpenWrt 包。
+电脑上推荐使用 **[drcom4scutGUI 图形界面](https://github.com/SeaLoong/drcom4scutGUI)**：填写账号、选择网卡，点击“连接”即可。桌面一体包已包含图形界面和命令行程序，解压后可以选择任一种操作方式；路由器使用 OpenWrt 核心包，包含认证核心、procd 后台脚本和可选的 LuCI 网页管理，不需要 .NET。
 
 | 你的设备 | 用窗口和按钮连接 | 用终端或后台服务连接 |
 | --- | --- | --- |

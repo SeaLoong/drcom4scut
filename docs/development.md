@@ -100,7 +100,7 @@ powershell -NoProfile -NonInteractive -File scripts/test-service-acl.ps1
 
 如果只是给路由器安装客户端，使用[现成下载包](openwrt.md)即可。以下步骤供需要自编译的人使用；目标名称同时限定处理器、系统及程序调用方式，请按目标设备选择。
 
-当前发布平台和特性以 [platforms.json](https://github.com/SeaLoong/drcom4scut/blob/master/.github/scripts/platforms.json) 为准。静态路由器产物使用 Rust 分发中的 self-contained musl 和 `rust-lld`；例如 ARMv7：
+当前发布平台和特性以 [platforms.json](https://github.com/SeaLoong/drcom4scut/blob/master/.github/scripts/platforms.json) 为准。除 MIPS/MIPSel 需从已校验源码准备目标标准库外，静态路由器产物使用 Rust 分发中的 self-contained musl 和 `rust-lld`；例如 ARMv7：
 
 ```sh
 rustup target add armv7-unknown-linux-musleabi
@@ -115,9 +115,43 @@ CC=clang AR=llvm-ar RUSTFLAGS='-C linker=rust-lld -C target-feature=+crt-static'
 python3 .github/scripts/package_release.py armv7-unknown-linux-musleabi --runner qemu-arm
 ```
 
-安装对应 QEMU user-mode 程序后执行测试。桌面 GNU Linux、Windows、macOS 的 x64/ARM64 目标使用匹配架构的原生 runner；静态 x64/ARM64 也在对应 Linux runner 上执行，ARMv5TE、ARMv7 和 RISC-V 通过 QEMU 执行。目前的发布清单覆盖五个静态路由器目标，具体设备兼容性通过真实固件和校园网络验证。
+安装对应 QEMU user-mode 程序后执行测试。桌面 GNU Linux、Windows、macOS 的 x64/ARM64 目标使用匹配架构的原生 runner；静态 x64/ARM64 也在对应 Linux runner 上执行，其他交叉目标通过清单指定的 QEMU 程序和 CPU 型号执行。当前源码矩阵覆盖 14 个静态路由器目标，六种桌面 GUI 一体包仍只使用原来的桌面核心目标。QEMU 通过不能证明特定固件、设备网卡或校园网已验证。
 
 `router` 配置优化完整路由器包的体积，程序生成在 `target/<目标>/router/`，打包器按平台清单选取相同配置。它保留日志、Portal 和 HTTPS 更新能力。CPU/运行库差异、静态与 SDK 动态包的取舍，以及 MIPS/MIPSel 所需工具链和验证步骤见[平台支持说明](platform-support.md)。
+
+### MIPS 与 MIPSel 工具链
+
+在 x86-64 GNU/Linux 主机安装 Python 3.12 或更新版、`make`、Clang/LLVM 和 QEMU user-mode；Ubuntu 24.04 可使用 `python3 make clang llvm qemu-user` 软件包。先准备官方稳定版 Rust 1.99.1，再在仓库根目录运行下例。脚本校验固定 Rust 与 musl 源码的 SHA-256，将标准库和静态 libc 安装到独立的 `target/mips-tools/`，并登记自定义工具链；不会向宿主 sysroot 写入目标库。Rust 源码展开及构建会占用数 GiB 磁盘，应用构建还需另计依赖和缓存。
+
+```sh
+rustup toolchain install 1.99.1 --profile minimal
+python3 .github/scripts/setup_mips_toolchain.py \
+  --target mips-unknown-linux-musl --work-dir target/mips-work \
+  --prefix target/mips-tools --jobs 2
+export RUSTUP_TOOLCHAIN=drcom-mips-1.99.1
+export CC_mips_unknown_linux_musl="$PWD/target/mips-tools/bin/mips-linux-musl-gcc"
+export AR_mips_unknown_linux_musl=llvm-ar
+export RUSTFLAGS='-C linker=rust-lld -C target-feature=+crt-static'
+cat > target/run-mips <<'SH'
+#!/bin/sh
+exec qemu-mips -cpu 24Kc "$@"
+SH
+chmod +x target/run-mips
+export DRCOM_TEST_RUNNER="$PWD/target/run-mips"
+export CARGO_TARGET_MIPS_UNKNOWN_LINUX_MUSL_RUNNER="$DRCOM_TEST_RUNNER"
+export RUST_TEST_THREADS=1
+cargo build --locked --profile router --target mips-unknown-linux-musl \
+  --no-default-features --features log4rs,portal-tls
+cargo test --locked --target mips-unknown-linux-musl \
+  --no-default-features --features log4rs,portal-tls
+cargo test --locked --target mips-unknown-linux-musl --no-default-features
+python3 .github/scripts/package_release.py mips-unknown-linux-musl \
+  --runner "$DRCOM_TEST_RUNNER"
+```
+
+小端构建将目标改为 `mipsel-unknown-linux-musl`，使用 `drcom-mipsel-1.99.1`、`mipsel-linux-musl-gcc`、`CC_mipsel_unknown_linux_musl` / `AR_mipsel_unknown_linux_musl`、`CARGO_TARGET_MIPSEL_UNKNOWN_LINUX_MUSL_RUNNER` 和 `qemu-mipsel`；建议使用独立工作目录。脚本也会在工作目录写出 `environment-mips.json` 或 `environment-mipsel.json`，记录准确的工具链与编译器路径；CI 通过 `--github-env` 激活这些值。
+
+这条路线不要求 nightly 或应用级 `RUSTC_BOOTSTRAP`。构建后仍须通过大小端、O32、MIPS32r2 和软浮点 ABI 检查；QEMU 结果与实机 OpenWrt、校园网结果分别记录。完成此类构建后，在其他 shell 使用常规稳定版，或先 `unset RUSTUP_TOOLCHAIN`。
 
 ## LuCI 页面包
 
@@ -135,7 +169,7 @@ SDK 按其发行版生成 `.ipk` 或 `.apk`。该包只包含 JS、Shell、JSON 
 
 修改代码后，GitHub 会自动检查格式、代码问题、测试及各平台构建。打包步骤还会确认“文件名说给哪种电脑使用，里面就确实是哪种程序”，并生成供下载者核对的校验值。
 
-[Rust CI](https://github.com/SeaLoong/drcom4scut/blob/master/.github/workflows/rust.yml) 在推送到 `master`、提交 PR 或手动运行时调用[共用验证工作流](https://github.com/SeaLoong/drcom4scut/blob/master/.github/workflows/validate-build.yml)；仅修改 `site/` 或 Pages 工作流的推送与 PR 由网站流程检查，随软件打包的 `docs/` 修改仍执行 Rust CI。它运行格式、两组严格 Clippy、默认/精简及目标特性测试、平台构建和脚本回归。清单包含六个桌面目标和五个静态路由器目标，共十一个；runner、模拟器和 Npcap 库架构在同一清单中明确声明。
+[Rust CI](https://github.com/SeaLoong/drcom4scut/blob/master/.github/workflows/rust.yml) 在推送到 `master`、提交 PR 或手动运行时调用[共用验证工作流](https://github.com/SeaLoong/drcom4scut/blob/master/.github/workflows/validate-build.yml)；仅修改 `site/` 或 Pages 工作流的推送与 PR 由网站流程检查，随软件打包的 `docs/` 修改仍执行 Rust CI。它运行格式、两组严格 Clippy、默认/精简及目标特性测试、平台构建和脚本回归。源码清单包含六个桌面目标和十四个静态路由器目标，共二十个；runner、模拟器和 Npcap 库架构在同一清单中明确声明。
 
 平台清单同时驱动构建矩阵、[打包器](https://github.com/SeaLoong/drcom4scut/blob/master/.github/scripts/package_release.py)和[发布完整性检查](https://github.com/SeaLoong/drcom4scut/blob/master/.github/scripts/verify_release.py)。Cargo 命令显式指定 target，打包前核对 ELF/PE/Mach-O、CPU、位宽、端序、静态属性、ARM 基线/ABI 和实际版本。包内包含程序、配置示例、文档、许可证及相应 OpenWrt 资源，并生成 SHA-256。`BUILD-INFO.json` 记录源码版本、提交、工作区状态和目标平台，汇总发布时再次核对。
 
@@ -147,7 +181,7 @@ SDK 按其发行版生成 `.ipk` 或 `.apk`。该包只包含 JS、Shell、JSON 
 
 Preview 是给使用者试用最新代码的开发预览，正式版 Release 仍由维护者手动发布。用户下载说明见[下载指南](download.md)；下面介绍维护流程。
 
-推送到本仓库 `master` 后，全部验证、平台清单中的十一个目标构建，以及六种桌面一体包检查成功才会自动创建 Preview。它直接使用本次 CI 的产物，不重新构建；PR、其他分支、fork 和手动运行普通 CI 均不发布。
+推送到本仓库 `master` 后，全部验证、平台清单中的全部目标构建，以及六种桌面一体包检查成功才会自动创建 Preview。它直接使用本次 CI 的产物，不重新构建；PR、其他分支、fork 和手动运行普通 CI 均不发布。
 
 预发布标签为 `preview-运行号-尝试号-提交号前八位`，固定指向本次完整提交号，不覆盖已有标签。程序版本仍采用 `Cargo.toml`，下载时通过预发布标签和说明中的提交号辨认构建。Preview 标记为 Pre-release，且不会替换正式版的 Latest。
 

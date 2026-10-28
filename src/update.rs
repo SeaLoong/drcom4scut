@@ -190,49 +190,175 @@ struct Target {
     bits: u8,
     format: &'static str,
     openwrt: bool,
-    arm_arch: Option<u8>,
+    endian: Endian,
+    elf_abi: ElfAbi,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Endian {
+    Little,
+    Big,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum ElfAbi {
+    Generic,
+    Arm { arch: u8, hard_float: bool },
+    LoongArchLp64d,
+    PowerPc64ElfV2,
+    Mips32r2O32Soft,
+}
+
+impl Target {
+    const fn elf(
+        name: &'static str,
+        machine: u32,
+        bits: u8,
+        openwrt: bool,
+        endian: Endian,
+        elf_abi: ElfAbi,
+    ) -> Self {
+        Self {
+            name,
+            machine,
+            bits,
+            format: "elf",
+            openwrt,
+            endian,
+            elf_abi,
+        }
+    }
+
+    const fn desktop(name: &'static str, machine: u32, format: &'static str) -> Self {
+        Self {
+            name,
+            machine,
+            bits: 64,
+            format,
+            openwrt: false,
+            endian: Endian::Little,
+            elf_abi: ElfAbi::Generic,
+        }
+    }
 }
 
 fn target_named(name: &str) -> Result<Target, UpdateError> {
-    let (machine, bits, format, openwrt, arm_arch) = match name {
-        "x86_64-unknown-linux-gnu" => (62, 64, "elf", false, None),
-        "aarch64-unknown-linux-gnu" => (183, 64, "elf", false, None),
-        "x86_64-unknown-linux-musl" => (62, 64, "elf", true, None),
-        "aarch64-unknown-linux-musl" => (183, 64, "elf", true, None),
-        "armv5te-unknown-linux-musleabi" => (40, 32, "elf", true, Some(4)),
-        "armv7-unknown-linux-musleabi" => (40, 32, "elf", true, Some(10)),
-        "riscv64gc-unknown-linux-musl" => (243, 64, "elf", true, None),
-        "x86_64-apple-darwin" => (0x1000007, 64, "macho", false, None),
-        "aarch64-apple-darwin" => (0x100000c, 64, "macho", false, None),
-        "x86_64-pc-windows-msvc" => (0x8664, 64, "pe", false, None),
-        "aarch64-pc-windows-msvc" => (0xaa64, 64, "pe", false, None),
-        _ => {
-            return Err(invalid(
-                "this build target has no supported release update asset",
-            ));
-        }
-    };
-    let name = match name {
-        "x86_64-unknown-linux-gnu" => "x86_64-unknown-linux-gnu",
-        "aarch64-unknown-linux-gnu" => "aarch64-unknown-linux-gnu",
-        "x86_64-unknown-linux-musl" => "x86_64-unknown-linux-musl",
-        "aarch64-unknown-linux-musl" => "aarch64-unknown-linux-musl",
-        "armv5te-unknown-linux-musleabi" => "armv5te-unknown-linux-musleabi",
-        "armv7-unknown-linux-musleabi" => "armv7-unknown-linux-musleabi",
-        "riscv64gc-unknown-linux-musl" => "riscv64gc-unknown-linux-musl",
-        "x86_64-apple-darwin" => "x86_64-apple-darwin",
-        "aarch64-apple-darwin" => "aarch64-apple-darwin",
-        "x86_64-pc-windows-msvc" => "x86_64-pc-windows-msvc",
-        _ => "aarch64-pc-windows-msvc",
-    };
-    Ok(Target {
-        name,
-        machine,
-        bits,
-        format,
-        openwrt,
-        arm_arch,
-    })
+    use ElfAbi::{Arm, Generic, LoongArchLp64d, Mips32r2O32Soft, PowerPc64ElfV2};
+    use Endian::{Big, Little};
+    // Keep identity and verification parameters in one registry. Unknown names
+    // must never inherit another platform's asset name or ABI.
+    const TARGETS: &[Target] = &[
+        Target::elf("x86_64-unknown-linux-gnu", 62, 64, false, Little, Generic),
+        Target::elf("aarch64-unknown-linux-gnu", 183, 64, false, Little, Generic),
+        Target::elf("x86_64-unknown-linux-musl", 62, 64, true, Little, Generic),
+        Target::elf("aarch64-unknown-linux-musl", 183, 64, true, Little, Generic),
+        Target::elf("i686-unknown-linux-musl", 3, 32, true, Little, Generic),
+        Target::elf(
+            "armv5te-unknown-linux-musleabi",
+            40,
+            32,
+            true,
+            Little,
+            Arm {
+                arch: 4,
+                hard_float: false,
+            },
+        ),
+        Target::elf(
+            "arm-unknown-linux-musleabi",
+            40,
+            32,
+            true,
+            Little,
+            Arm {
+                arch: 6,
+                hard_float: false,
+            },
+        ),
+        Target::elf(
+            "arm-unknown-linux-musleabihf",
+            40,
+            32,
+            true,
+            Little,
+            Arm {
+                arch: 6,
+                hard_float: true,
+            },
+        ),
+        Target::elf(
+            "armv7-unknown-linux-musleabi",
+            40,
+            32,
+            true,
+            Little,
+            Arm {
+                arch: 10,
+                hard_float: false,
+            },
+        ),
+        Target::elf(
+            "armv7-unknown-linux-musleabihf",
+            40,
+            32,
+            true,
+            Little,
+            Arm {
+                arch: 10,
+                hard_float: true,
+            },
+        ),
+        Target::elf(
+            "riscv64gc-unknown-linux-musl",
+            243,
+            64,
+            true,
+            Little,
+            Generic,
+        ),
+        Target::elf(
+            "loongarch64-unknown-linux-musl",
+            258,
+            64,
+            true,
+            Little,
+            LoongArchLp64d,
+        ),
+        Target::elf(
+            "powerpc64-unknown-linux-musl",
+            21,
+            64,
+            true,
+            Big,
+            PowerPc64ElfV2,
+        ),
+        Target::elf(
+            "powerpc64le-unknown-linux-musl",
+            21,
+            64,
+            true,
+            Little,
+            PowerPc64ElfV2,
+        ),
+        Target::elf("mips-unknown-linux-musl", 8, 32, true, Big, Mips32r2O32Soft),
+        Target::elf(
+            "mipsel-unknown-linux-musl",
+            8,
+            32,
+            true,
+            Little,
+            Mips32r2O32Soft,
+        ),
+        Target::desktop("x86_64-apple-darwin", 0x1000007, "macho"),
+        Target::desktop("aarch64-apple-darwin", 0x100000c, "macho"),
+        Target::desktop("x86_64-pc-windows-msvc", 0x8664, "pe"),
+        Target::desktop("aarch64-pc-windows-msvc", 0xaa64, "pe"),
+    ];
+    TARGETS
+        .iter()
+        .copied()
+        .find(|target| target.name == name)
+        .ok_or_else(|| invalid("this build target has no supported release update asset"))
 }
 
 fn stable_version(tag: &str) -> Result<Version, UpdateError> {
@@ -584,6 +710,18 @@ fn unpack_binary(bytes: &[u8], release: &AvailableUpdate) -> Result<Vec<u8>, Upd
 }
 
 fn number(data: &[u8], offset: usize, size: usize) -> Result<u64, UpdateError> {
+    ordered_number(data, offset, size, Endian::Little)
+}
+
+fn ordered_number(
+    data: &[u8],
+    offset: usize,
+    size: usize,
+    endian: Endian,
+) -> Result<u64, UpdateError> {
+    if size > 8 {
+        return Err(invalid("executable integer exceeds supported width"));
+    }
     let value = data
         .get(
             offset
@@ -592,10 +730,11 @@ fn number(data: &[u8], offset: usize, size: usize) -> Result<u64, UpdateError> {
                     .ok_or_else(|| invalid("executable offset overflow"))?,
         )
         .ok_or_else(|| invalid("truncated executable header"))?;
-    Ok(value
-        .iter()
-        .enumerate()
-        .fold(0, |n, (i, byte)| n | (u64::from(*byte) << (8 * i))))
+    let byte = |n, byte: &u8| (n << 8) | u64::from(*byte);
+    Ok(match endian {
+        Endian::Little => value.iter().rev().fold(0, byte),
+        Endian::Big => value.iter().fold(0, byte),
+    })
 }
 
 fn verify_abi(data: &[u8], target: Target) -> Result<(), UpdateError> {
@@ -603,27 +742,25 @@ fn verify_abi(data: &[u8], target: Target) -> Result<(), UpdateError> {
     match target.format {
         "elf" => {
             let header = if target.bits == 64 { 64 } else { 52 };
+            let read = |offset, size| ordered_number(data, offset, size, target.endian);
             if data.len() < header
                 || &data[..4] != b"\x7fELF"
-                || data[5] != 1
+                || data[5]
+                    != if target.endian == Endian::Little {
+                        1
+                    } else {
+                        2
+                    }
                 || data[4] != if target.bits == 64 { 2 } else { 1 }
-                || number(data, 18, 2)? != u64::from(target.machine)
-                || ![2, 3].contains(&number(data, 16, 2)?)
+                || read(18, 2)? != u64::from(target.machine)
+                || ![2, 3].contains(&read(16, 2)?)
             {
                 return Err(bad());
             }
             let (offset, size, count) = if target.bits == 64 {
-                (
-                    number(data, 32, 8)?,
-                    number(data, 54, 2)?,
-                    number(data, 56, 2)?,
-                )
+                (read(32, 8)?, read(54, 2)?, read(56, 2)?)
             } else {
-                (
-                    number(data, 28, 4)?,
-                    number(data, 42, 2)?,
-                    number(data, 44, 2)?,
-                )
+                (read(28, 4)?, read(42, 2)?, read(44, 2)?)
             };
             if size < if target.bits == 64 { 56 } else { 32 }
                 || count == 0
@@ -635,18 +772,45 @@ fn verify_abi(data: &[u8], target: Target) -> Result<(), UpdateError> {
             }
             if target.openwrt {
                 for index in 0..count {
-                    if number(data, (offset + size * index) as usize, 4)? == 3 {
+                    if read((offset + size * index) as usize, 4)? == 3 {
                         return Err(invalid(
                             "OpenWrt update is not a static executable (PT_INTERP present)",
                         ));
                     }
                 }
             }
-            if let Some(arch) = target.arm_arch {
-                if number(data, 36, 4)? & 0x400 != 0 {
-                    return Err(invalid("ARM update has a hard-float ABI"));
+            let flags = read(if target.bits == 64 { 48 } else { 36 }, 4)?;
+            match target.elf_abi {
+                ElfAbi::Generic => (),
+                ElfAbi::Arm { arch, hard_float } => {
+                    if if hard_float {
+                        flags & 0x600 != 0x400
+                    } else {
+                        flags & 0x400 != 0
+                    } {
+                        return Err(invalid(
+                            "ARM floating-point ABI does not match the release target",
+                        ));
+                    }
+                    verify_arm_attributes(data, arch, hard_float)?;
                 }
-                verify_arm_attributes(data, arch)?;
+                ElfAbi::LoongArchLp64d if flags & 0xc7 != 0x43 => {
+                    return Err(invalid(
+                        "LoongArch update requires LP64D and object ABI version 1",
+                    ));
+                }
+                ElfAbi::PowerPc64ElfV2 if flags & 3 != 2 => {
+                    return Err(invalid("PowerPC64 musl update requires ELFv2 ABI"));
+                }
+                ElfAbi::Mips32r2O32Soft => {
+                    if flags & 0xf000f000 != 0x70001000 || flags & 0x0fff0660 != 0 {
+                        return Err(invalid(
+                            "MIPS update requires generic MIPS32r2 O32 soft-float ABI",
+                        ));
+                    }
+                    verify_mips_attributes(data, target.endian, offset, size, count)?;
+                }
+                ElfAbi::LoongArchLp64d | ElfAbi::PowerPc64ElfV2 => (),
             }
         }
         "macho" => {
@@ -679,6 +843,12 @@ fn verify_abi(data: &[u8], target: Target) -> Result<(), UpdateError> {
                 return Err(bad());
             }
             let offset = number(data, 60, 4)? as usize;
+            // e_lfanew is a u32, so additions can overflow usize on a 32-bit
+            // router even though the downloaded executable is small.
+            let header_end = offset.checked_add(26).ok_or_else(bad)?;
+            if data.get(offset..header_end).is_none() {
+                return Err(bad());
+            }
             if data.get(offset..offset + 4) != Some(b"PE\0\0")
                 || number(data, offset + 4, 2)? != u64::from(target.machine)
                 || number(data, offset + 22, 2)? & 0x0002 == 0
@@ -719,7 +889,7 @@ fn skip_string(bytes: &[u8], position: &mut usize) -> Result<(), UpdateError> {
     Ok(())
 }
 
-fn verify_arm_attributes(data: &[u8], expected: u8) -> Result<(), UpdateError> {
+fn verify_arm_attributes(data: &[u8], expected: u8, hard_float: bool) -> Result<(), UpdateError> {
     let offset = number(data, 32, 4)?;
     let size = number(data, 46, 2)?;
     let count = number(data, 48, 2)?;
@@ -732,6 +902,7 @@ fn verify_arm_attributes(data: &[u8], expected: u8) -> Result<(), UpdateError> {
         return Err(invalid("missing ARM architecture attributes"));
     }
     let mut found = false;
+    let mut found_vfp_args = false;
     for index in 0..count {
         let section = (offset + size * index) as usize;
         if number(data, section + 4, 4)? != 0x70000003 {
@@ -783,6 +954,15 @@ fn verify_arm_attributes(data: &[u8], expected: u8) -> Result<(), UpdateError> {
                                     }
                                     found = true;
                                 }
+                                28 => {
+                                    let args = uleb(&bytes[..subend], &mut position)?;
+                                    if args != u64::from(hard_float) {
+                                        return Err(invalid(
+                                            "ARM VFP argument ABI does not match the release target",
+                                        ));
+                                    }
+                                    found_vfp_args = true;
+                                }
                                 4 | 5 | 65 | 67 => skip_string(&bytes[..subend], &mut position)?,
                                 32 => {
                                     uleb(&bytes[..subend], &mut position)?;
@@ -805,6 +985,63 @@ fn verify_arm_attributes(data: &[u8], expected: u8) -> Result<(), UpdateError> {
     }
     if !found {
         return Err(invalid("missing ARM CPU baseline attribute"));
+    }
+    if hard_float && !found_vfp_args {
+        return Err(invalid("missing ARM hard-float VFP argument attribute"));
+    }
+    Ok(())
+}
+
+fn verify_mips_attributes(
+    data: &[u8],
+    endian: Endian,
+    ph_offset: u64,
+    ph_size: u64,
+    ph_count: u64,
+) -> Result<(), UpdateError> {
+    let read = |offset, size| ordered_number(data, offset, size, endian);
+    let mut found = false;
+    for index in 0..ph_count {
+        let header = (ph_offset + ph_size * index) as usize;
+        if read(header, 4)? != 0x70000003 {
+            // PT_MIPS_ABIFLAGS
+            continue;
+        }
+        if found {
+            return Err(invalid("duplicate MIPS ABI flags"));
+        }
+        let start = read(header + 4, 4)? as usize;
+        let length = read(header + 16, 4)?;
+        if length != 24 {
+            return Err(invalid("invalid MIPS ABI flags size"));
+        }
+        let bytes = data
+            .get(
+                start
+                    ..start
+                        .checked_add(24)
+                        .ok_or_else(|| invalid("MIPS ABI flags offset overflow"))?,
+            )
+            .ok_or_else(|| invalid("truncated MIPS ABI flags"))?;
+        // ELF_MIPS_ABIFlags_v0: MIPS32r2, 32-bit GPRs, no coprocessor
+        // registers, soft-float, and no vendor/ISA extensions.
+        if ordered_number(bytes, 0, 2, endian)? != 0
+            || bytes[2..8] != [32, 2, 1, 0, 0, 3]
+            || ordered_number(bytes, 8, 4, endian)? != 0
+            || ordered_number(bytes, 12, 4, endian)? != 0
+            // LLVM may set the defined ODDSPREG flag even for soft-float code;
+            // the register sizes and FP ABI above establish the calling ABI.
+            || ordered_number(bytes, 16, 4, endian)? & !1 != 0
+            || ordered_number(bytes, 20, 4, endian)? != 0
+        {
+            return Err(invalid(
+                "MIPS ABI flags do not match MIPS32r2 O32 soft-float",
+            ));
+        }
+        found = true;
+    }
+    if !found {
+        return Err(invalid("missing MIPS ABI flags"));
     }
     Ok(())
 }
@@ -960,21 +1197,75 @@ mod tests {
         target_named("x86_64-unknown-linux-gnu").unwrap()
     }
 
+    fn write_number(bytes: &mut [u8], offset: usize, size: usize, value: u64, endian: Endian) {
+        let encoded = if endian == Endian::Little {
+            value.to_le_bytes()
+        } else {
+            value.to_be_bytes()
+        };
+        bytes[offset..offset + size].copy_from_slice(if endian == Endian::Little {
+            &encoded[..size]
+        } else {
+            &encoded[8 - size..]
+        });
+    }
+
     fn elf(target: Target) -> Vec<u8> {
         let mut bytes = vec![0; 512];
         bytes[..4].copy_from_slice(b"\x7fELF");
         bytes[4] = if target.bits == 64 { 2 } else { 1 };
-        bytes[5] = 1;
-        bytes[16] = 2;
-        bytes[18..20].copy_from_slice(&(target.machine as u16).to_le_bytes());
-        if target.bits == 64 {
-            bytes[32] = 64;
-            bytes[54] = 56;
-            bytes[56] = 1;
+        bytes[5] = if target.endian == Endian::Little {
+            1
         } else {
-            bytes[28] = 52;
-            bytes[42] = 32;
-            bytes[44] = 1;
+            2
+        };
+        write_number(&mut bytes, 16, 2, 2, target.endian);
+        write_number(&mut bytes, 18, 2, u64::from(target.machine), target.endian);
+        if target.bits == 64 {
+            write_number(&mut bytes, 32, 8, 64, target.endian);
+            write_number(&mut bytes, 54, 2, 56, target.endian);
+            write_number(&mut bytes, 56, 2, 1, target.endian);
+            write_number(&mut bytes, 64, 4, 1, target.endian);
+        } else {
+            write_number(&mut bytes, 28, 4, 52, target.endian);
+            write_number(&mut bytes, 42, 2, 32, target.endian);
+            write_number(&mut bytes, 44, 2, 1, target.endian);
+            write_number(&mut bytes, 52, 4, 1, target.endian);
+        }
+        match target.elf_abi {
+            ElfAbi::Generic => (),
+            ElfAbi::Arm { arch, hard_float } => {
+                write_number(
+                    &mut bytes,
+                    36,
+                    4,
+                    if hard_float { 0x05000400 } else { 0x05000200 },
+                    target.endian,
+                );
+                write_number(&mut bytes, 32, 4, 256, target.endian);
+                write_number(&mut bytes, 46, 2, 40, target.endian);
+                write_number(&mut bytes, 48, 2, 1, target.endian);
+                write_number(&mut bytes, 260, 4, 0x70000003, target.endian);
+                write_number(&mut bytes, 272, 4, 384, target.endian);
+                write_number(&mut bytes, 276, 4, 20, target.endian);
+                bytes[384] = b'A';
+                write_number(&mut bytes, 385, 4, 19, target.endian);
+                bytes[389..395].copy_from_slice(b"aeabi\0");
+                bytes[395] = 1;
+                write_number(&mut bytes, 396, 4, 9, target.endian);
+                bytes[400..404].copy_from_slice(&[6, arch, 28, u8::from(hard_float)]);
+            }
+            ElfAbi::LoongArchLp64d => write_number(&mut bytes, 48, 4, 0x43, target.endian),
+            ElfAbi::PowerPc64ElfV2 => write_number(&mut bytes, 48, 4, 2, target.endian),
+            ElfAbi::Mips32r2O32Soft => {
+                write_number(&mut bytes, 36, 4, 0x70001007, target.endian);
+                write_number(&mut bytes, 44, 2, 2, target.endian);
+                write_number(&mut bytes, 84, 4, 0x70000003, target.endian);
+                write_number(&mut bytes, 88, 4, 384, target.endian);
+                write_number(&mut bytes, 100, 4, 24, target.endian);
+                bytes[386..392].copy_from_slice(&[32, 2, 1, 0, 0, 3]);
+                write_number(&mut bytes, 400, 4, 1, target.endian);
+            }
         }
         bytes
     }
@@ -1306,6 +1597,214 @@ mod tests {
         binary[18] = 183;
         assert!(verify_abi(&binary, target).is_err());
         assert!(verify_abi(&[0; 64], target).is_err());
+    }
+
+    #[test]
+    fn declared_platforms_resolve_exact_asset_identity_and_elf_byte_order() {
+        let platforms: serde_json::Value =
+            serde_json::from_str(include_str!("../.github/scripts/platforms.json")).unwrap();
+        for platform in platforms.as_array().unwrap() {
+            let name = platform["target"].as_str().unwrap();
+            let selected = target_named(name).unwrap();
+            assert_eq!(selected.name, name);
+            assert_eq!(
+                u64::from(selected.machine),
+                platform["machine"].as_u64().unwrap()
+            );
+            assert_eq!(u64::from(selected.bits), platform["bits"].as_u64().unwrap());
+            assert_eq!(selected.format, platform["format"].as_str().unwrap());
+            assert_eq!(selected.openwrt, platform["openwrt"].as_bool().unwrap());
+            assert_eq!(
+                selected.endian == Endian::Big,
+                platform["endian"].as_str() == Some("big")
+            );
+        }
+        for unknown in [
+            "i586-unknown-linux-musl",
+            "mips64-unknown-linux-muslabi64",
+            "unknown",
+        ] {
+            assert!(target_named(unknown).is_err());
+        }
+    }
+
+    #[test]
+    fn additional_static_targets_reject_wrong_endian_cpu_and_dynamic_loader() {
+        for name in [
+            "i686-unknown-linux-musl",
+            "arm-unknown-linux-musleabi",
+            "arm-unknown-linux-musleabihf",
+            "armv7-unknown-linux-musleabihf",
+            "loongarch64-unknown-linux-musl",
+            "powerpc64-unknown-linux-musl",
+            "powerpc64le-unknown-linux-musl",
+            "mips-unknown-linux-musl",
+            "mipsel-unknown-linux-musl",
+        ] {
+            let selected = target_named(name).unwrap();
+            let original = elf(selected);
+            assert!(verify_abi(&original, selected).is_ok(), "{name}");
+            let mut wrong_endian = original.clone();
+            wrong_endian[5] = if original[5] == 1 { 2 } else { 1 };
+            assert!(verify_abi(&wrong_endian, selected).is_err(), "{name}");
+            let mut wrong_machine = original.clone();
+            write_number(&mut wrong_machine, 18, 2, 0xffff, selected.endian);
+            assert!(verify_abi(&wrong_machine, selected).is_err(), "{name}");
+            let mut dynamic = original.clone();
+            write_number(
+                &mut dynamic,
+                if selected.bits == 64 { 64 } else { 52 },
+                4,
+                3,
+                selected.endian,
+            );
+            assert!(verify_abi(&dynamic, selected).is_err(), "{name}");
+            assert!(verify_abi(&original[..31], selected).is_err(), "{name}");
+        }
+    }
+
+    #[test]
+    fn arm_float_calling_conventions_and_cpu_baselines_are_not_interchangeable() {
+        for name in [
+            "arm-unknown-linux-musleabihf",
+            "armv7-unknown-linux-musleabihf",
+        ] {
+            let selected = target_named(name).unwrap();
+            let original = elf(selected);
+            assert!(verify_abi(&original, selected).is_ok());
+            for flags in [0, 0x05000200, 0x05000600] {
+                let mut binary = original.clone();
+                write_number(&mut binary, 36, 4, flags, selected.endian);
+                assert!(verify_abi(&binary, selected).is_err());
+            }
+            for (offset, value) in [(401, 4), (402, 0), (403, 0), (403, 3)] {
+                let mut binary = original.clone();
+                binary[offset] = value;
+                assert!(verify_abi(&binary, selected).is_err());
+            }
+        }
+        let soft = target_named("arm-unknown-linux-musleabi").unwrap();
+        let hard = target_named("arm-unknown-linux-musleabihf").unwrap();
+        assert!(verify_abi(&elf(soft), hard).is_err());
+        assert!(verify_abi(&elf(hard), soft).is_err());
+        let mut contradictory = elf(soft);
+        contradictory[403] = 1;
+        assert!(verify_abi(&contradictory, soft).is_err());
+        let mut implicit_base = elf(soft);
+        implicit_base[402] = 0; // No Tag_ABI_VFP_args means the base calling convention.
+        assert!(verify_abi(&implicit_base, soft).is_ok());
+    }
+
+    #[test]
+    fn loongarch_and_powerpc_object_abis_are_checked() {
+        let loong = target_named("loongarch64-unknown-linux-musl").unwrap();
+        for flags in [0, 0x41, 0x42, 3, 0x83] {
+            let mut binary = elf(loong);
+            write_number(&mut binary, 48, 4, flags, loong.endian);
+            assert!(verify_abi(&binary, loong).is_err());
+        }
+        let big = target_named("powerpc64-unknown-linux-musl").unwrap();
+        let little = target_named("powerpc64le-unknown-linux-musl").unwrap();
+        assert!(verify_abi(&elf(big), little).is_err());
+        assert!(verify_abi(&elf(little), big).is_err());
+        for selected in [big, little] {
+            for flags in [0, 1, 3] {
+                let mut binary = elf(selected);
+                write_number(&mut binary, 48, 4, flags, selected.endian);
+                assert!(verify_abi(&binary, selected).is_err());
+            }
+            let mut overflowing = elf(selected);
+            write_number(&mut overflowing, 32, 8, u64::MAX, selected.endian);
+            assert!(verify_abi(&overflowing, selected).is_err());
+        }
+    }
+
+    #[test]
+    fn mips_requires_o32_soft_float_isa_and_bounded_abi_flags() {
+        for name in ["mips-unknown-linux-musl", "mipsel-unknown-linux-musl"] {
+            let selected = target_named(name).unwrap();
+            let original = elf(selected);
+            for flags1 in [0, 1] {
+                let mut binary = original.clone();
+                write_number(&mut binary, 400, 4, flags1, selected.endian);
+                assert!(verify_abi(&binary, selected).is_ok());
+            }
+            let mut duplicate = original.clone();
+            write_number(&mut duplicate, 44, 2, 3, selected.endian);
+            write_number(&mut duplicate, 116, 4, 0x70000003, selected.endian);
+            write_number(&mut duplicate, 120, 4, 384, selected.endian);
+            write_number(&mut duplicate, 132, 4, 24, selected.endian);
+            assert!(verify_abi(&duplicate, selected).is_err());
+            for flags in [
+                0x50001007, 0x90001007, 0x70002007, 0x70000007, 0x70001027, 0x70001207, 0x70001407,
+                0x72001007, 0x70811007,
+            ] {
+                let mut binary = original.clone();
+                write_number(&mut binary, 36, 4, flags, selected.endian);
+                assert!(
+                    verify_abi(&binary, selected).is_err(),
+                    "{name} flags {flags:x}"
+                );
+            }
+            for (offset, value) in [
+                (384, 1),
+                (386, 64),
+                (387, 6),
+                (388, 2),
+                (389, 1),
+                (390, 1),
+                (391, 1),
+            ] {
+                let mut binary = original.clone();
+                binary[offset] = value;
+                assert!(
+                    verify_abi(&binary, selected).is_err(),
+                    "{name} byte {offset}"
+                );
+            }
+            for (offset, value) in [
+                (392, 1),
+                (396, 1),
+                (400, 2),
+                (404, 1),
+                (84, 1),
+                (88, u64::from(u32::MAX)),
+                (100, 23),
+                (100, 25),
+            ] {
+                let mut binary = original.clone();
+                write_number(&mut binary, offset, 4, value, selected.endian);
+                assert!(
+                    verify_abi(&binary, selected).is_err(),
+                    "{name} field {offset}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn pe_offsets_are_bounded_before_arithmetic_on_32_bit_hosts() {
+        let selected = target_named("x86_64-pc-windows-msvc").unwrap();
+        let mut original = vec![0; 90];
+        original[..2].copy_from_slice(b"MZ");
+        write_number(&mut original, 60, 4, 64, Endian::Little);
+        original[64..68].copy_from_slice(b"PE\0\0");
+        write_number(
+            &mut original,
+            68,
+            2,
+            u64::from(selected.machine),
+            Endian::Little,
+        );
+        write_number(&mut original, 86, 2, 2, Endian::Little);
+        write_number(&mut original, 88, 2, 0x20b, Endian::Little);
+        assert!(verify_abi(&original, selected).is_ok());
+        assert!(verify_abi(&original[..89], selected).is_err());
+        for offset in [u64::from(u32::MAX), u64::from(u32::MAX - 1), 89] {
+            let mut malformed = original.clone();
+            write_number(&mut malformed, 60, 4, offset, Endian::Little);
+            assert!(verify_abi(&malformed, selected).is_err());
+        }
     }
 
     #[test]

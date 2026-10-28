@@ -14,9 +14,9 @@ MIPS 是处理器架构，musl 是 C 运行库。同一种 musl 既可以静态�
 | 操作系统与运行库 | GNU Linux 使用 glibc，OpenWrt 通常使用 musl；动态程序还需匹配加载器和共享库 |
 | 工具链 | Rust 编译器、目标标准库、C 编译器、链接器与目标系统库共同组成构建条件 |
 
-## 当前发布范围
+## 源码构建矩阵与下载范围
 
-核心的[平台清单](https://github.com/SeaLoong/drcom4scut/blob/master/.github/scripts/platforms.json)包含 **11 个目标：6 个桌面目标和 5 个静态 OpenWrt 目标**。下载时以该次 Release 实际提供的文件为准。
+核心的[平台清单](https://github.com/SeaLoong/drcom4scut/blob/master/.github/scripts/platforms.json)包含 **20 个目标：6 个桌面目标和 14 个静态路由器目标**。这是当前源码的构建与验证范围；已有正式版不会自动增加附件，下载时以所选 Release 实际提供的文件为准。六种桌面 GUI 一体包保持独立，新增路由器目标只生成核心、procd 服务和可选 LuCI 资源，不引入 .NET。
 
 | 桌面系统 | x64 目标 | ARM64 目标 |
 | --- | --- | --- |
@@ -27,10 +27,19 @@ MIPS 是处理器架构，musl 是 C 运行库。同一种 musl 既可以静态�
 | 静态 OpenWrt 目标 | 处理器条件 |
 | --- | --- |
 | `x86_64-unknown-linux-musl` | x86-64 |
+| `i686-unknown-linux-musl` | 32 位 x86，需 SSE2；不代表仅支持 i586 的旧 CPU |
 | `aarch64-unknown-linux-musl` | ARM64 |
 | `armv5te-unknown-linux-musleabi` | ARMv5TE，软浮点 ABI |
+| `arm-unknown-linux-musleabi` | ARMv6，软浮点 ABI |
+| `arm-unknown-linux-musleabihf` | ARMv6，VFP、硬浮点 ABI |
 | `armv7-unknown-linux-musleabi` | ARMv7，软浮点 ABI |
-| `riscv64gc-unknown-linux-musl` | 64 位 RISC-V，支持 GC 扩展 |
+| `armv7-unknown-linux-musleabihf` | ARMv7-A，VFPv3-D16、硬浮点 ABI |
+| `riscv64gc-unknown-linux-musl` | 64 位 RISC-V，GC 扩展 |
+| `loongarch64-unknown-linux-musl` | LoongArch64，LP64D ABI、LSX |
+| `powerpc64-unknown-linux-musl` | 64 位 PowerPC，大端、ELFv2 ABI |
+| `powerpc64le-unknown-linux-musl` | 64 位 PowerPC，小端、ELFv2 ABI |
+| `mips-unknown-linux-musl` | MIPS32r2，大端、O32 软浮点 ABI |
+| `mipsel-unknown-linux-musl` | MIPS32r2，小端、O32 软浮点 ABI |
 
 静态 musl 程序自带所需的 C 运行库，不依赖固件中的 musl 动态加载器，适合在匹配架构的不同固件间分发。它仍依赖兼容的 Linux 内核、网卡和权限；HTTPS 证书信任还需要可用的证书来源。当前发布与更新校验要求 OpenWrt 程序没有 `PT_INTERP` 动态加载器记录。
 
@@ -58,27 +67,23 @@ qemu-arm ./target/armv7-unknown-linux-musleabi/router/drcom4scut --version
 
 | 目标与构建配置 | 程序文件 | 单程序 gzip |
 | --- | ---: | ---: |
-| glibc，`x86_64-unknown-linux-gnu` / `release` | 5.37 MiB | 2.61 MiB |
-| 静态 musl，`x86_64-unknown-linux-musl` / `release` | 5.50 MiB | 2.68 MiB |
-| 静态 musl，同一目标 / `router` | 3.78 MiB | 1.94 MiB |
+| glibc，`x86_64-unknown-linux-gnu` / `release` | 5.38 MiB | 2.61 MiB |
+| 静态 musl，`x86_64-unknown-linux-musl` / `release` | 5.51 MiB | 2.68 MiB |
+| 静态 musl，同一目标 / `router` | 3.79 MiB | 1.94 MiB |
 
-本次静态 musl 文件比 glibc 文件大约 2.4%；切换到 `router` 配置后，同一静态目标的文件减小约 31.3%，gzip 减小约 27.8%。前两者还包含目标标准库和链接方式的差异，不能把差额全部归为 libc，也不能推广为所有架构的固定比例。优化后的程序通过 ABI、版本及私有密码输入配置检查，完整功能未删减；文件变小不代表运行内存或速度必然更好，仍需在实际路由器上验证。
+本次静态 musl 文件比 glibc 文件大约 2.4%；切换到 `router` 配置后，同一静态目标的文件减小约 31.2%，gzip 减小约 27.8%。前两者还包含目标标准库和链接方式的差异，不能把差额全部归为 libc，也不能推广为所有架构的固定比例。优化后的程序通过 ABI、版本及私有密码输入配置检查，完整功能未删减；文件变小不代表运行内存或速度必然更好，仍需在实际路由器上验证。
 
 桌面 GUI 的 .NET 自包含发布是另一个体积来源；其[平台与发布体积说明](https://github.com/SeaLoong/drcom4scutGUI/blob/master/docs/platform-support.md)单独比较了运行时随包与系统共享两种方式。
 
-## MIPS 与 MIPSel 的接入计划
+## MIPS 与 MIPSel 的稳定工具链
 
-**目前没有发布 MIPS/MIPSel 包。** Rust 1.99 的 `mips-unknown-linux-musl` 与 `mipsel-unknown-linux-musl` 均为 Tier 3：编译器认识这些目标，源码中也有标准库支持，但 Rust 官方不提供预编译标准库。`rustc --print target-list` 能列出目标，不代表 `rustup target add` 可以安装；当前安装会提示没有预编译产物。
+MIPS/MIPSel 已加入源码构建矩阵，分别使用大端和小端 MIPS32r2、O32、软浮点 ABI。这不覆盖 MIPS64、MIPS32r6 或所有同名路由器。Rust 1.99 的这两个目标为 Tier 3，没有可用的官方预编译目标标准库，不能直接依赖 `rustup target add`。
 
-这两个目标采用 MIPS32r2、O32 ABI、软浮点，分别为大端与小端，最大原子操作宽度为 32 位。它们不能代表全部 MIPS 设备，更不能直接用于不同 ABI 的 MIPS64。接入前需要：
+[工具链准备脚本](https://github.com/SeaLoong/drcom4scut/blob/master/.github/scripts/setup_mips_toolchain.py)固定稳定版 Rust **1.99.1** 与 musl **1.2.5** 源码，并校验下载的 SHA-256。它使用 Rust 的 bootstrap `local-rebuild / stage0` 路径构建目标标准库，在独立目录安装交叉工具链；不修改宿主 sysroot，不需要 nightly，也不要求应用构建设置 `RUSTC_BOOTSTRAP`。CI 对这两个目标执行相同准备步骤。
 
-1. 确定设备型号、CPU/字节序/浮点 ABI、OpenWrt 版本与 target/subtarget，以及可用存储和内存。可提供 `ubus call system board`、`uname -m`、`opkg print-architecture` 或 `apk --print-arch` 的输出，去掉设备标识和个人信息即可，不需要校园账号或密码。
-2. 固定匹配的 OpenWrt SDK 和可验证来源的稳定版 Rust 工具链，包含目标标准库；版本需满足 `Cargo.toml` 的最低要求。没有合适的现成工具链时，需要从对应稳定版 Rust 源码构建。OpenWrt 的 Rust 配方提供了这种构建方式，但应核对实际版本和补丁，不能假设下载一个 SDK 就已包含足够新的 Rust。
-3. 对齐 C 运行库、Rust 标准库和 `libc` 绑定的时间 ABI，验证时钟、socket 超时与文件信息。目标没有 64 位原子操作，依赖和测试也需使用兼容实现。`ring` 有通用 C 路径，不能仅凭其汇编目标列表断言不支持 MIPS；TLS、随机数和证书校验仍须实际构建、运行验证。
-4. 扩展打包器和更新器的 ELF 校验，分别核对大小端、`EM_MIPS`、O32、指令集和浮点 ABI，并增加拒绝错误架构的测试。现有校验只接受小端 ELF，不能仅添加平台名称就开始发布。
-5. 用 `qemu-mips`、`qemu-mipsel` 分别执行目标测试和产物检查，再在对应 OpenWrt 设备验证安装、procd/LuCI、抓包、权限和实际认证。通过后才加入发布清单和下载说明。
+本地步骤见[开发文档](development.md#mips-与-mipsel-工具链)。准备后仍需验证完整功能、精简功能、ELF 大小端/O32/浮点 ABI、子进程和归档更新。QEMU 测试通过只证明所用模拟器中的行为，不代表具体 OpenWrt 固件的网卡、procd/LuCI、资源占用和校园认证均已实机验证。
 
-Cargo 的 `-Zbuild-std` 可以从源码编译标准库，但官方要求 nightly Cargo、nightly rustc 和 `rust-src`。它属于另一个需要单独维护和验证的工具链方案；本项目当前仍使用稳定版，不把 nightly 当作默认补救措施。
+i586 也出现在 Rust 的目标列表中，但当前 TLS 依赖的实际构建需要 SSE2，不能把强制启用 SSE2 的产物称为可在旧 i586 CPU 上运行。当前采用明确要求 SSE2 的 i686 包；其他未进入清单的目标同样需要实际构建、ABI 检查和运行验证后再提供。
 
 ## SDK 动态包与通用静态包
 
@@ -90,13 +95,17 @@ Cargo 的 `-Zbuild-std` 可以从源码编译标准库，但官方要求 nightly
 
 | 路线 | 适用情况与当前状态 |
 | --- | --- |
-| 完整功能、体积优化的静态包 | 当前五个 OpenWrt 目标采用 `router` 配置，适合跨匹配架构的固件分发。 |
+| 完整功能、体积优化的静态包 | 当前十四个路由器目标采用 `router` 配置，适合跨匹配架构的固件分发。 |
 | 指定固件的 SDK 动态包 | 未来可复用系统库，由固件包管理器安装依赖；需要单独的包身份、ABI 验证和升级规则，尚未发布。 |
 | 明确裁剪能力的有线专用包 | 未来可把更新器及其 HTTP/TLS、归档依赖也设为可选，以降低占用；必须明确缺少哪些功能，不能把当前 `--no-default-features` 当成这种包。 |
 
 动态包或裁剪包不能沿用现有静态完整包的附件名和自动更新选择逻辑，否则更新时可能被替换成另一种构建。应先定义变体、依赖和升级策略，再验证并发布；普通用户继续使用功能完整的标准包。
 
 ## 怎样理解验证结果
+
+2026-10-28，本轮新增的 i686、ARMv6 软/硬浮点、ARMv7 硬浮点、LoongArch64、大小端 PowerPC64、MIPS/MIPSel 共 9 个目标，均已生成完整功能程序，并在清单指定的 QEMU CPU 上通过完整与精简功能测试。MIPS/MIPSel 在最终源码上分别通过完整功能 214 项、精简功能 180 项测试。最终优化产物重新构建后通过 ABI、版本和私有配置检查，9 个实际归档也确认只有核心与 OpenWrt 服务/LuCI 资源，没有 GUI 或 .NET 运行时。
+
+强化后的 ABI 校验还验证了此前正式版的 11 个真实核心组件，均保持兼容；不会为了接受新架构而放松动态加载器、端序或浮点 ABI 检查。这些是构建、模拟器与产物验证结果，尚不代表新增目标已经在具体 OpenWrt 硬件或校园网络上通过验收。
 
 | 已完成的检查 | 能说明什么 |
 | --- | --- |
@@ -112,7 +121,7 @@ Cargo 的 `-Zbuild-std` 可以从源码编译标准库，但官方要求 nightly
 
 - [Rust 平台支持与 Tier 3 定义](https://doc.rust-lang.org/rustc/platform-support.html#tier-3)
 - [Rust 1.99 MIPS musl 目标](https://github.com/rust-lang/rust/blob/1.99.0/compiler/rustc_target/src/spec/targets/mips_unknown_linux_musl.rs)与 [MIPSel musl 目标](https://github.com/rust-lang/rust/blob/1.99.0/compiler/rustc_target/src/spec/targets/mipsel_unknown_linux_musl.rs)
-- [Cargo build-std 要求](https://doc.rust-lang.org/cargo/reference/unstable.html#build-std)
+- [Rust bootstrap 构建说明](https://rustc-dev-guide.rust-lang.org/building/bootstrapping.html)
 - [OpenWrt SDK 使用说明](https://openwrt.org/docs/guide-developer/toolchain/using_the_sdk)
 - [OpenWrt Rust 构建配方](https://github.com/openwrt/packages/blob/master/lang/rust/Makefile)与[目标、链接配置](https://github.com/openwrt/packages/blob/master/lang/rust/rust-values.mk)
 - [ring 的目标处理](https://github.com/briansmith/ring/blob/2723abbca9e83347d82b056d5b239c6604f786df/include/ring-core/target.h)与[构建实现](https://github.com/briansmith/ring/blob/2723abbca9e83347d82b056d5b239c6604f786df/build.rs)

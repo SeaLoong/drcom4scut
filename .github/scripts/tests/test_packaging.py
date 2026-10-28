@@ -20,18 +20,51 @@ verify_release = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(verify_release)
 
 
-def elf(machine=62, bits=64, interpreter=False):
+def elf(machine=62, bits=64, interpreter=False, *, endian="little", flags=None,
+        arm_arch=None, arm_float_abi="soft", vfp_args=None, mips_abi=True):
+    order = "<" if endian == "little" else ">"
     data = bytearray(128)
-    data[:6] = b"\x7fELF" + bytes([2 if bits == 64 else 1, 1])
-    struct.pack_into("<H", data, 18, machine)
+    data[:6] = b"\x7fELF" + bytes([2 if bits == 64 else 1, 1 if endian == "little" else 2])
+    struct.pack_into(order + "HH", data, 16, 2, machine)
+    if flags is None:
+        flags = {8: 0x70001007, 21: 2, 258: 0x43}.get(machine, 0)
+        if machine == 40:
+            flags = 0x05000400 if arm_float_abi == "hard" else 0x05000200
+    struct.pack_into(order + "I", data, 48 if bits == 64 else 36, flags)
     if bits == 64:
-        struct.pack_into("<Q", data, 32, 64)
-        struct.pack_into("<HH", data, 54, 56, 1)
+        struct.pack_into(order + "Q", data, 32, 64)
+        struct.pack_into(order + "HH", data, 54, 56, 1)
     else:
-        struct.pack_into("<I", data, 28, 64)
-        struct.pack_into("<HH", data, 42, 32, 1)
-    struct.pack_into("<I", data, 64, 3 if interpreter else 1)
+        struct.pack_into(order + "I", data, 28, 64)
+        struct.pack_into(order + "HH", data, 42, 32, 1)
+    struct.pack_into(order + "I", data, 64, 3 if interpreter else 1)
+    if arm_arch is not None:
+        attributes = bytes([6, arm_arch])
+        if arm_float_abi == "hard" and vfp_args is None:
+            vfp_args = 1
+        if vfp_args is not None:
+            attributes += bytes([28, vfp_args])
+        file_section = b"\x01" + struct.pack("<I", len(attributes) + 5) + attributes
+        vendor = b"aeabi\0" + file_section
+        payload = b"A" + struct.pack("<I", len(vendor) + 4) + vendor
+        data.extend(bytes(208 - len(data)) + payload)
+        struct.pack_into("<I", data, 32, 128)
+        struct.pack_into("<HH", data, 46, 40, 2)
+        struct.pack_into("<I", data, 172, 0x70000003)
+        struct.pack_into("<II", data, 184, 208, len(payload))
+    if machine == 8 and mips_abi:
+        data.extend(bytes(max(0, 184 - len(data))))
+        struct.pack_into(order + "H", data, 44, 2)
+        struct.pack_into(order + "IIIIIIII", data, 96, 0x70000003, 160, 0, 0, 24, 24, 4, 8)
+        struct.pack_into(order + "H6B4I", data, 160, 0, 32, 2, 1, 0, 0, 3, 0, 0, 0, 0)
     return data
+
+
+def platform_elf(platform, *, wrong_cpu=False):
+    return elf(62 if wrong_cpu else platform["machine"], platform["bits"],
+               endian=platform.get("endian", "little"),
+               arm_arch={"v5TE": 4, "v6": 6, "v7": 10}.get(platform.get("arm_arch")),
+               arm_float_abi=platform.get("arm_float_abi", "soft"))
 
 
 def macho(machine=16777223, filetype=2):
@@ -64,7 +97,7 @@ class PackagingTests(unittest.TestCase):
         prefix = f'drcom4scut-0.4.1-{platform["target"]}/'
         name = "drcom4scut.exe" if platform["format"] == "pe" else "drcom4scut"
         if platform["format"] == "elf":
-            data = elf(62 if wrong_cpu else platform["machine"], platform["bits"])
+            data = platform_elf(platform, wrong_cpu=wrong_cpu)
         elif platform["format"] == "macho":
             data = macho(platform["machine"])
         else:
@@ -157,7 +190,7 @@ class PackagingTests(unittest.TestCase):
         for target, platform in package_release.PLATFORMS.items():
             if platform["format"] == "elf":
                 with self.subTest(target=target):
-                    self.check_elf(target, elf(platform["machine"], platform["bits"]))
+                    self.check_elf(target, platform_elf(platform))
 
     def test_mislabeled_host_binary_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "architecture"):
@@ -169,6 +202,117 @@ class PackagingTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "static"):
             self.check_elf("x86_64-unknown-linux-musl", elf(interpreter=True))
         self.check_elf("x86_64-unknown-linux-gnu", elf(interpreter=True))
+
+    def test_additional_router_cpu_endian_and_float_variants(self):
+        variants = [
+            {"machine": 3, "bits": 32},
+            {"machine": 40, "bits": 32, "arm_arch": "v6", "arm_float_abi": "soft"},
+            {"machine": 40, "bits": 32, "arm_arch": "v6", "arm_float_abi": "hard"},
+            {"machine": 40, "bits": 32, "arm_arch": "v7", "arm_float_abi": "hard"},
+            {"machine": 258, "bits": 64},
+            {"machine": 21, "bits": 64, "endian": "big"},
+            {"machine": 21, "bits": 64, "endian": "little"},
+            {"machine": 8, "bits": 32, "endian": "big"},
+            {"machine": 8, "bits": 32, "endian": "little"},
+        ]
+        for variant in variants:
+            platform = dict(variant, format="elf", openwrt=True)
+            with self.subTest(platform=platform):
+                data = platform_elf(platform)
+                package_release.verify_abi_bytes(data, platform)
+                opposite = "big" if platform.get("endian", "little") == "little" else "little"
+                with self.assertRaisesRegex(ValueError, "endian"):
+                    package_release.verify_abi_bytes(data, dict(platform, endian=opposite))
+
+    def test_non_executable_and_malformed_program_tables_are_rejected_for_both_endians(self):
+        for endian in ("little", "big"):
+            order = "<" if endian == "little" else ">"
+            platform = {"machine": 21, "bits": 64, "endian": endian, "format": "elf", "openwrt": True}
+            data = elf(machine=21, endian=endian)
+            for offset, format, value in ((16, "H", 1), (32, "Q", 2**64 - 1), (54, "H", 4), (56, "H", 0)):
+                bad = bytearray(data)
+                struct.pack_into(order + format, bad, offset, value)
+                with self.subTest(endian=endian, offset=offset), self.assertRaises(ValueError):
+                    package_release.verify_abi_bytes(bad, platform)
+            with self.assertRaisesRegex(ValueError, "static"):
+                package_release.verify_abi_bytes(elf(machine=21, endian=endian, interpreter=True), platform)
+
+    def test_powerpc_elfv1_and_loongarch_wrong_float_or_object_abi_are_rejected(self):
+        for endian in ("little", "big"):
+            platform = {"machine": 21, "bits": 64, "endian": endian, "format": "elf", "openwrt": True}
+            for flags in (0, 1, 3):
+                with self.subTest(endian=endian, flags=flags), self.assertRaisesRegex(ValueError, "ELFv2"):
+                    package_release.verify_abi_bytes(elf(machine=21, endian=endian, flags=flags), platform)
+        platform = {"machine": 258, "bits": 64, "format": "elf", "openwrt": True}
+        for flags in (0x41, 0x42, 0x03, 0x83):
+            with self.subTest(flags=flags), self.assertRaisesRegex(ValueError, "LP64D"):
+                package_release.verify_abi_bytes(elf(machine=258, flags=flags), platform)
+
+    def test_arm_cpu_and_vfp_arguments_are_checked_in_archive_abi_validation(self):
+        soft = {"machine": 40, "bits": 32, "format": "elf", "openwrt": True, "arm_arch": "v6"}
+        hard = dict(soft, arm_float_abi="hard")
+        for arch in (4, 10):
+            with self.subTest(arch=arch), self.assertRaisesRegex(ValueError, "CPU baseline"):
+                package_release.verify_abi_bytes(elf(machine=40, bits=32, arm_arch=arch), soft)
+        with self.assertRaisesRegex(ValueError, "attributes"):
+            package_release.verify_abi_bytes(elf(machine=40, bits=32), soft)
+        with self.assertRaisesRegex(ValueError, "VFP argument"):
+            package_release.verify_abi_bytes(elf(machine=40, bits=32, arm_arch=6, vfp_args=1), soft)
+        for flags in (0x05000200, 0x05000600):
+            with self.subTest(flags=flags), self.assertRaisesRegex(ValueError, "float ABI"):
+                package_release.verify_abi_bytes(elf(machine=40, bits=32, flags=flags, arm_arch=6, arm_float_abi="hard"), hard)
+        with self.assertRaisesRegex(ValueError, "Missing ARM hard-float"):
+            package_release.verify_abi_bytes(elf(machine=40, bits=32, flags=0x05000400, arm_arch=6), hard)
+        for value in (0, 3):
+            with self.subTest(vfp=value), self.assertRaisesRegex(ValueError, "VFP argument"):
+                package_release.verify_abi_bytes(elf(machine=40, bits=32, arm_arch=6, arm_float_abi="hard", vfp_args=value), hard)
+        malformed = elf(machine=40, bits=32, arm_arch=6)
+        struct.pack_into("<I", malformed, 209, 0)
+        with self.assertRaisesRegex(ValueError, "vendor attributes"):
+            package_release.verify_abi_bytes(malformed, soft)
+
+    def test_mips_requires_o32_mips32r2_soft_float_without_extensions(self):
+        for endian in ("little", "big"):
+            order = "<" if endian == "little" else ">"
+            platform = {"machine": 8, "bits": 32, "endian": endian, "format": "elf", "openwrt": True}
+            for flags in (0x50001007, 0x70003007, 0x70001027, 0x70001047,
+                          0x70001207, 0x70001407, 0x71001007, 0x70011007):
+                with self.subTest(endian=endian, flags=flags), self.assertRaisesRegex(ValueError, "MIPS32r2"):
+                    package_release.verify_abi_bytes(elf(machine=8, bits=32, endian=endian, flags=flags), platform)
+            for offset, format, value in ((0, "H", 1), (2, "B", 64), (3, "B", 1), (4, "B", 2),
+                                          (5, "B", 1), (6, "B", 1), (7, "B", 1), (8, "I", 1),
+                                          (12, "I", 1), (16, "I", 2), (20, "I", 1)):
+                bad = elf(machine=8, bits=32, endian=endian)
+                struct.pack_into(order + format, bad, 160 + offset, value)
+                with self.subTest(endian=endian, offset=offset), self.assertRaisesRegex(ValueError, "soft-float ABI"):
+                    package_release.verify_abi_bytes(bad, platform)
+
+    def test_mips_allows_defined_oddspreg_metadata_with_soft_float(self):
+        # LLVM emits ODDSPREG even for O32 soft-float with no CP1 registers.
+        for endian in ("little", "big"):
+            order = "<" if endian == "little" else ">"
+            platform = {"machine": 8, "bits": 32, "endian": endian, "format": "elf", "openwrt": True}
+            data = elf(machine=8, bits=32, endian=endian)
+            struct.pack_into(order + "I", data, 176, 1)
+            package_release.verify_abi_bytes(data, platform)
+
+    def test_mips_missing_duplicate_truncated_or_unbounded_abi_flags_are_rejected(self):
+        for endian in ("little", "big"):
+            order = "<" if endian == "little" else ">"
+            platform = {"machine": 8, "bits": 32, "endian": endian, "format": "elf", "openwrt": True}
+            with self.assertRaisesRegex(ValueError, "one MIPS"):
+                package_release.verify_abi_bytes(elf(machine=8, bits=32, endian=endian, mips_abi=False), platform)
+            duplicate = elf(machine=8, bits=32, endian=endian)
+            duplicate[64:96] = duplicate[96:128]
+            with self.assertRaisesRegex(ValueError, "one MIPS"):
+                package_release.verify_abi_bytes(duplicate, platform)
+            for offset, value in ((100, 2**32 - 1), (112, 23), (112, 25)):
+                bad = elf(machine=8, bits=32, endian=endian)
+                struct.pack_into(order + "I", bad, offset, value)
+                with self.subTest(endian=endian, offset=offset, value=value), self.assertRaisesRegex(ValueError, "Malformed MIPS"):
+                    package_release.verify_abi_bytes(bad, platform)
+            with self.assertRaisesRegex(ValueError, "Malformed MIPS"):
+                package_release.verify_abi_bytes(elf(machine=8, bits=32, endian=endian)[:-1], platform)
 
     def test_truncated_or_wrong_endian_header_is_rejected(self):
         for data in [b"", b"\x7fELF", bytes(128), elf()[:60]]:
@@ -269,6 +413,7 @@ class PackagingTests(unittest.TestCase):
                 self.assertEqual((platform["runner"], platform["format"]), (runner, format))
                 self.assertFalse(platform.get("emulator"))
                 self.assertFalse(platform["openwrt"])
+        self.assertEqual({p["target"] for p in package_release.PLATFORMS.values() if not p["openwrt"]}, set(native))
         self.assertEqual(package_release.PLATFORMS["x86_64-pc-windows-msvc"]["npcap_arch"], "x64")
         self.assertEqual(package_release.PLATFORMS["aarch64-pc-windows-msvc"]["npcap_arch"], "ARM64")
 
@@ -330,7 +475,7 @@ class PackagingTests(unittest.TestCase):
                 line.split("  ", 1) for line in (dist / "SHA256SUMS").read_text().splitlines()
             )}
             self.assertEqual(actual, expected)
-            self.assertEqual(len(actual), 11)
+            self.assertEqual(len(actual), len(json.loads(manifest.read_text())))
             affected = json.loads(manifest.read_text())[2]
             invalid = dist / f'drcom4scut-0.4.1-{affected["target"]}.tar.gz'
             original = invalid.read_bytes()
@@ -375,11 +520,18 @@ class PackagingTests(unittest.TestCase):
                 self.assertEqual(output.extractfile(prefix + "docs/development.md").read(), b"Offline developer guide")
             self.assertTrue(archive.with_suffix(archive.suffix + ".sha256").is_file())
 
-    def test_all_openwrt_arches_are_official_musl_targets(self):
-        supported = {p["target"] for p in json.loads((ROOT / ".github/scripts/platforms.json").read_text()) if p["openwrt"]}
-        self.assertEqual(len(supported), 5)
-        self.assertTrue(all("musl" in target for target in supported))
-        self.assertFalse(any("mips" in target for target in supported))
+    def test_router_manifest_selects_static_musl_profile_and_explicit_float_abi(self):
+        supported = [p for p in json.loads((ROOT / ".github/scripts/platforms.json").read_text()) if p["openwrt"]]
+        self.assertTrue(supported)
+        for platform in supported:
+            with self.subTest(target=platform["target"]):
+                self.assertIn("musl", platform["target"])
+                self.assertEqual(platform["profile"], "router")
+                if platform["target"].endswith("eabihf"):
+                    self.assertEqual(platform["arm_float_abi"], "hard")
+                elif platform["machine"] == 40:
+                    self.assertEqual(platform.get("arm_float_abi", "soft"), "soft")
+                self.assertIn(platform.get("endian", "little"), ("little", "big"))
 
     def test_openwrt_bundle_requires_and_ships_the_default_installation_config(self):
         with tempfile.TemporaryDirectory() as directory:

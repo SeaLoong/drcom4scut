@@ -25,29 +25,163 @@ def verify_abi(binary, platform):
     verify_abi_bytes(data, platform)
 
 
+def number(data, offset, size, endian="little"):
+    if offset < 0 or offset + size > len(data):
+        raise ValueError("Truncated executable metadata")
+    return int.from_bytes(data[offset:offset + size], endian)
+
+
+def verify_arm_attributes(data, expected, hard_float):
+    """Check EABI file attributes directly, including during release aggregation."""
+    offset, size, count = number(data, 32, 4), number(data, 46, 2), number(data, 48, 2)
+    if size < 40 or not count or offset + size * count > len(data):
+        raise ValueError("Missing ARM architecture attributes")
+    found_cpu, found_vfp = False, False
+
+    def uleb(payload, position, end):
+        value = 0
+        for shift in range(0, 64, 7):
+            if position >= end:
+                raise ValueError("Truncated ARM attribute integer")
+            byte = payload[position]
+            position += 1
+            if shift == 63 and byte > 1:
+                raise ValueError("ARM attribute integer overflow")
+            value |= (byte & 0x7f) << shift
+            if not byte & 0x80:
+                return value, position
+        raise ValueError("ARM attribute integer overflow")
+
+    def string_end(payload, position, end):
+        stop = payload.find(b"\0", position, end)
+        if stop == -1:
+            raise ValueError("Unterminated ARM attribute string")
+        return stop + 1
+
+    for index in range(count):
+        section = offset + size * index
+        if number(data, section + 4, 4) != 0x70000003:
+            continue
+        start, length = number(data, section + 16, 4), number(data, section + 20, 4)
+        if start + length > len(data):
+            raise ValueError("Truncated ARM attributes")
+        payload = data[start:start + length]
+        if not payload or payload[0] != ord("A"):
+            raise ValueError("Invalid ARM attributes")
+        vendor = 1
+        while vendor < len(payload):
+            length = number(payload, vendor, 4)
+            end = vendor + length
+            if length < 5 or end > len(payload):
+                raise ValueError("Invalid ARM vendor attributes")
+            position = vendor + 4
+            aeabi = payload[position:position + 6] == b"aeabi\0"
+            position = string_end(payload, position, end)
+            if aeabi:
+                while position < end:
+                    subsection = position
+                    tag, position = uleb(payload, position, end)
+                    length = number(payload, position, 4)
+                    position += 4
+                    subend = subsection + length
+                    if subend > end or subend < position:
+                        raise ValueError("Invalid ARM file attributes")
+                    if tag == 1:
+                        while position < subend:
+                            tag, position = uleb(payload, position, subend)
+                            if tag in (6, 28):
+                                value, position = uleb(payload, position, subend)
+                                if tag == 6:
+                                    if value != expected:
+                                        raise ValueError("ARM CPU baseline does not match target")
+                                    found_cpu = True
+                                else:
+                                    if value != int(hard_float):
+                                        raise ValueError("ARM VFP argument ABI does not match target")
+                                    found_vfp = True
+                            elif tag in (4, 5, 65, 67) or tag >= 32 and tag % 2:
+                                position = string_end(payload, position, subend)
+                            elif tag == 32:
+                                _, position = uleb(payload, position, subend)
+                                position = string_end(payload, position, subend)
+                            else:
+                                _, position = uleb(payload, position, subend)
+                    position = subend
+            vendor = end
+    if not found_cpu:
+        raise ValueError("Missing ARM CPU baseline attribute")
+    if hard_float and not found_vfp:
+        raise ValueError("Missing ARM hard-float VFP argument attribute")
+
+
+def verify_mips_attributes(data, segments, endian):
+    offsets = [(offset, size) for kind, offset, size in segments if kind == 0x70000003]
+    if len(offsets) != 1:
+        raise ValueError("Expected one MIPS ABI flags segment")
+    offset, size = offsets[0]
+    if size != 24 or offset + size > len(data):
+        raise ValueError("Malformed MIPS ABI flags segment")
+    attrs = data[offset:offset + size]
+    if (number(attrs, 0, 2, endian) != 0 or attrs[2:8] != bytes([32, 2, 1, 0, 0, 3])
+            or number(attrs, 8, 4, endian) != 0 or number(attrs, 12, 4, endian) != 0
+            or number(attrs, 16, 4, endian) & ~1 or number(attrs, 20, 4, endian) != 0):
+        raise ValueError("Expected MIPS32r2 O32 soft-float ABI without ISA extensions")
+
+
 def verify_abi_bytes(data, platform):
     if platform["format"] == "elf":
-        if len(data) < 52 or data[:4] != b"\x7fELF" or data[5] != 1:
-            raise ValueError("Expected a little-endian ELF executable")
+        endian = platform.get("endian", "little")
+        if endian not in ("little", "big"):
+            raise ValueError("Unknown platform byte order")
+        if len(data) < 52 or data[:4] != b"\x7fELF" or data[5] != {"little": 1, "big": 2}[endian]:
+            raise ValueError(f"Expected a {endian}-endian ELF executable")
         if len(data) < (64 if platform["bits"] == 64 else 52):
             raise ValueError("Truncated ELF header")
         if data[4] != {32: 1, 64: 2}[platform["bits"]]:
             raise ValueError("ELF word size does not match target")
-        if struct.unpack_from("<H", data, 18)[0] != platform["machine"]:
+        if number(data, 18, 2, endian) != platform["machine"]:
             raise ValueError("ELF CPU architecture does not match target")
+        if number(data, 16, 2, endian) not in (2, 3):
+            raise ValueError("ELF artifact is not an executable")
+        if platform["bits"] == 64:
+            offset = number(data, 32, 8, endian)
+            entry_size, count = number(data, 54, 2, endian), number(data, 56, 2, endian)
+        else:
+            offset = number(data, 28, 4, endian)
+            entry_size, count = number(data, 42, 2, endian), number(data, 44, 2, endian)
+        if entry_size < (56 if platform["bits"] == 64 else 32) or not count or offset + entry_size * count > len(data):
+            raise ValueError("Malformed ELF program header table")
+        segments = []
+        for index in range(count):
+            header = offset + index * entry_size
+            kind = number(data, header, 4, endian)
+            if platform["bits"] == 64:
+                file_offset, file_size = number(data, header + 8, 8, endian), number(data, header + 32, 8, endian)
+            else:
+                file_offset, file_size = number(data, header + 4, 4, endian), number(data, header + 16, 4, endian)
+            segments.append((kind, file_offset, file_size))
         if platform["openwrt"]:
             # No PT_INTERP means there is no GNU/musl dynamic loader dependency.
             # Static PIE may have PT_DYNAMIC, so inspecting ldd output is weaker.
-            if platform["bits"] == 64:
-                offset = struct.unpack_from("<Q", data, 32)[0]
-                entry_size, count = struct.unpack_from("<HH", data, 54)
-            else:
-                offset = struct.unpack_from("<I", data, 28)[0]
-                entry_size, count = struct.unpack_from("<HH", data, 42)
-            if entry_size < 4 or offset + entry_size * count > len(data):
-                raise ValueError("Malformed ELF program header table")
-            if any(struct.unpack_from("<I", data, offset + i * entry_size)[0] == 3 for i in range(count)):
+            if any(kind == 3 for kind, _, _ in segments):
                 raise ValueError("OpenWrt artifacts must be static (unexpected PT_INTERP)")
+        flags = number(data, 48 if platform["bits"] == 64 else 36, 4, endian)
+        if "arm_arch" in platform:
+            float_abi = platform.get("arm_float_abi", "soft")
+            if float_abi not in ("soft", "hard"):
+                raise ValueError("Unknown ARM float ABI")
+            hard_float = float_abi == "hard"
+            if hard_float and flags & 0x600 != 0x400 or not hard_float and flags & 0x400:
+                raise ValueError("ARM float ABI does not match target")
+            verify_arm_attributes(data, {"v5TE": 4, "v6": 6, "v7": 10}[platform["arm_arch"]], hard_float)
+        elif platform["machine"] == 21 and flags & 3 != 2:
+            raise ValueError("Expected PowerPC64 ELFv2 ABI")
+        elif platform["machine"] == 258 and flags & 0xc7 != 0x43:
+            raise ValueError("Expected LoongArch LP64D object ABI v1")
+        elif platform["machine"] == 8:
+            if platform["bits"] != 32 or flags & 0xf000f000 != 0x70001000 or flags & 0x0fff0660:
+                raise ValueError("Expected MIPS32r2 O32 soft-float ELF flags")
+            verify_mips_attributes(data, segments, endian)
     elif platform["format"] == "macho":
         # Publish one thin, native executable per CPU. Universal/fat containers
         # cannot establish which slice the --version smoke test actually ran.
@@ -108,14 +242,6 @@ def package(root, target, runner=(), target_dir=None):
     if not binary.is_file():
         raise ValueError(f"Missing {profile} executable for {target}: {binary}")
     verify_abi(binary, platform)
-    if "arm_arch" in platform:
-        # ARMv5TE and ARMv7 share e_machine. Verify attributes too, rather than
-        # accepting a wrongly labelled newer-CPU binary which fails on old routers.
-        attributes = subprocess.check_output(["readelf", "-A", str(binary)], text=True)
-        if not re.search(r"Tag_CPU_arch:\s*" + re.escape(platform["arm_arch"]) + r"\s*$", attributes, re.MULTILINE):
-            raise ValueError("ARM CPU baseline does not match target")
-        if struct.unpack_from("<I", binary.read_bytes(), 36)[0] & 0x400:
-            raise ValueError("Expected ARM soft-float ABI, found hard-float")
     reported = subprocess.check_output([*runner, str(binary), "--version"], text=True).strip()
     if reported != f"drcom4scut {version}":
         raise ValueError(f"Unexpected built version: {reported!r}")

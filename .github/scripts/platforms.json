@@ -118,5 +118,161 @@
     "openwrt": false,
     "runner": "windows-11-arm",
     "npcap_arch": "ARM64"
+  },
+  {
+    "format": "elf",
+    "openwrt": true,
+    "features": [
+      "log4rs",
+      "portal-tls"
+    ],
+    "runner": "ubuntu-24.04",
+    "profile": "router",
+    "target": "i686-unknown-linux-musl",
+    "machine": 3,
+    "bits": 32,
+    "emulator": "qemu-i386",
+    "emulator_cpu": "pentium3,+sse2",
+    "cflags": "-march=pentium4 -msse2"
+  },
+  {
+    "format": "elf",
+    "openwrt": true,
+    "features": [
+      "log4rs",
+      "portal-tls"
+    ],
+    "runner": "ubuntu-24.04",
+    "profile": "router",
+    "target": "arm-unknown-linux-musleabi",
+    "machine": 40,
+    "bits": 32,
+    "arm_arch": "v6",
+    "arm_float_abi": "soft",
+    "emulator": "qemu-arm",
+    "emulator_cpu": "arm1176",
+    "cflags": "-march=armv6 -mfloat-abi=soft"
+  },
+  {
+    "format": "elf",
+    "openwrt": true,
+    "features": [
+      "log4rs",
+      "portal-tls"
+    ],
+    "runner": "ubuntu-24.04",
+    "profile": "router",
+    "target": "arm-unknown-linux-musleabihf",
+    "machine": 40,
+    "bits": 32,
+    "arm_arch": "v6",
+    "arm_float_abi": "hard",
+    "emulator": "qemu-arm",
+    "emulator_cpu": "arm1176",
+    "cflags": "-march=armv6 -mfpu=vfp -mfloat-abi=hard"
+  },
+  {
+    "format": "elf",
+    "openwrt": true,
+    "features": [
+      "log4rs",
+      "portal-tls"
+    ],
+    "runner": "ubuntu-24.04",
+    "profile": "router",
+    "target": "armv7-unknown-linux-musleabihf",
+    "machine": 40,
+    "bits": 32,
+    "arm_arch": "v7",
+    "arm_float_abi": "hard",
+    "emulator": "qemu-arm",
+    "emulator_cpu": "cortex-a9",
+    "cflags": "-march=armv7-a -mfpu=vfpv3-d16 -mfloat-abi=hard"
+  },
+  {
+    "format": "elf",
+    "openwrt": true,
+    "features": [
+      "log4rs",
+      "portal-tls"
+    ],
+    "runner": "ubuntu-24.04",
+    "profile": "router",
+    "target": "loongarch64-unknown-linux-musl",
+    "machine": 258,
+    "bits": 64,
+    "emulator": "qemu-loongarch64",
+    "emulator_cpu": "la464",
+    "cflags": "-mabi=lp64d -mlsx"
+  },
+  {
+    "format": "elf",
+    "openwrt": true,
+    "features": [
+      "log4rs",
+      "portal-tls"
+    ],
+    "runner": "ubuntu-24.04",
+    "profile": "router",
+    "target": "powerpc64-unknown-linux-musl",
+    "machine": 21,
+    "bits": 64,
+    "endian": "big",
+    "emulator": "qemu-ppc64",
+    "emulator_cpu": "POWER8",
+    "cflags": "-mabi=elfv2"
+  },
+  {
+    "format": "elf",
+    "openwrt": true,
+    "features": [
+      "log4rs",
+      "portal-tls"
+    ],
+    "runner": "ubuntu-24.04",
+    "profile": "router",
+    "target": "powerpc64le-unknown-linux-musl",
+    "machine": 21,
+    "bits": 64,
+    "emulator": "qemu-ppc64le",
+    "emulator_cpu": "POWER8",
+    "cflags": "-mabi=elfv2"
+  },
+  {
+    "format": "elf",
+    "openwrt": true,
+    "features": [
+      "log4rs",
+      "portal-tls"
+    ],
+    "runner": "ubuntu-24.04",
+    "profile": "router",
+    "target": "mips-unknown-linux-musl",
+    "machine": 8,
+    "bits": 32,
+    "endian": "big",
+    "emulator": "qemu-mips",
+    "emulator_cpu": "24Kc",
+    "cflags": "-march=mips32r2 -mabi=32 -msoft-float",
+    "std_from_source": true,
+    "toolchain": "1.99.1"
+  },
+  {
+    "format": "elf",
+    "openwrt": true,
+    "features": [
+      "log4rs",
+      "portal-tls"
+    ],
+    "runner": "ubuntu-24.04",
+    "profile": "router",
+    "target": "mipsel-unknown-linux-musl",
+    "machine": 8,
+    "bits": 32,
+    "emulator": "qemu-mipsel",
+    "emulator_cpu": "24Kc",
+    "cflags": "-march=mips32r2 -mabi=32 -msoft-float",
+    "std_from_source": true,
+    "toolchain": "1.99.1"
   }
 ]
