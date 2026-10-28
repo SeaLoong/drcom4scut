@@ -30,7 +30,9 @@ opkg print-architecture
 | `armv5te-unknown-linux-musleabi` | 支持 ARMv5TE 指令的设备 |
 | `riscv64gc-unknown-linux-musl` | 支持 GC 扩展的 64 位 RISC-V 设备 |
 
-当前提供上表五类处理器的包。ARMv5 设备选择 ARMv5TE 包，RISC-V 设备需支持 GC 指令扩展。选择时一并核对设备规格和固件；需要帮助时提供上述命令输出与设备型号。MIPS/MIPSEL 设备可选择面向这些处理器的其他客户端；开发者可查阅 [Rust 平台要求](https://doc.rust-lang.org/rustc/platform-support.html)。
+当前提供上表五类处理器的包。ARMv5 设备选择 ARMv5TE 包，RISC-V 设备需支持 GC 指令扩展。选择时一并核对设备规格和固件；需要帮助时提供上述命令输出与设备型号。
+
+MIPS/MIPSel 尚无发布包，接入需要匹配的 Rust 标准库、OpenWrt 工具链和大小端/ABI 校验。开发计划与设备信息清单见[平台支持与路由器构建](platform-support.md#mips-与-mipsel-的接入计划)。现有路由器构建使用保留功能的体积优化，仍包含 TLS、证书校验和在线更新；空间有限时，应同时核对解压后大小和运行内存，不能只比较压缩包。
 
 ## 安装与账号配置
 

@@ -8,6 +8,7 @@
 | --- | --- |
 | 在自己的电脑编译一次 | [本机构建与检查](#本机构建与检查) |
 | 为路由器生成程序 | [OpenWrt 交叉构建](#openwrt-交叉构建) |
+| 核对支持的平台、包体积或接入 MIPS | [平台支持与路由器构建](platform-support.md) |
 | 修改认证代码，确认没有破坏已有行为 | [模块与运行模型](#模块与运行模型)、[测试层次](#测试层次) |
 | 维护测试包或正式版 | [CI 与打包](#ci-与打包)、[自动预发布](#自动预发布)、[手动发布](#手动发布) |
 
@@ -103,18 +104,20 @@ powershell -NoProfile -NonInteractive -File scripts/test-service-acl.ps1
 
 ```sh
 rustup target add armv7-unknown-linux-musleabi
-RUSTFLAGS='-C linker=rust-lld -C target-feature=+crt-static' \
-  cargo build --locked --release --target armv7-unknown-linux-musleabi \
+CC=clang AR=llvm-ar RUSTFLAGS='-C linker=rust-lld -C target-feature=+crt-static' \
+  cargo build --locked --profile router --target armv7-unknown-linux-musleabi \
     --no-default-features --features log4rs,portal-tls
 DRCOM_TEST_RUNNER=qemu-arm \
 CARGO_TARGET_ARMV7_UNKNOWN_LINUX_MUSLEABI_RUNNER=qemu-arm \
-RUSTFLAGS='-C linker=rust-lld -C target-feature=+crt-static' \
+CC=clang AR=llvm-ar RUSTFLAGS='-C linker=rust-lld -C target-feature=+crt-static' \
   cargo test --locked --target armv7-unknown-linux-musleabi \
     --no-default-features --features log4rs,portal-tls
 python3 .github/scripts/package_release.py armv7-unknown-linux-musleabi --runner qemu-arm
 ```
 
 安装对应 QEMU user-mode 程序后执行测试。桌面 GNU Linux、Windows、macOS 的 x64/ARM64 目标使用匹配架构的原生 runner；静态 x64/ARM64 也在对应 Linux runner 上执行，ARMv5TE、ARMv7 和 RISC-V 通过 QEMU 执行。目前的发布清单覆盖五个静态路由器目标，具体设备兼容性通过真实固件和校园网络验证。
+
+`router` 配置优化完整路由器包的体积，程序生成在 `target/<目标>/router/`，打包器按平台清单选取相同配置。它保留日志、Portal 和 HTTPS 更新能力。CPU/运行库差异、静态与 SDK 动态包的取舍，以及 MIPS/MIPSel 所需工具链和验证步骤见[平台支持说明](platform-support.md)。
 
 ## LuCI 页面包
 

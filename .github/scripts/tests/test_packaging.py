@@ -100,6 +100,59 @@ class PackagingTests(unittest.TestCase):
             binary.write_bytes(data)
             package_release.verify_abi(binary, package_release.PLATFORMS[target])
 
+    def write_router_source(self, root):
+        for name, contents in {
+            "Cargo.toml": '[package]\nversion = "0.4.0"\n',
+            "README.md": "OpenWrt fixture",
+            "LICENSE": "Fixture license",
+            "src/default_config.yml": "username: ''\n",
+            "packaging/openwrt/files/config.yml": "username: ''\n",
+            "packaging/openwrt/files/drcom4scut.init": "Fixture service",
+            "packaging/openwrt/files/drcom4scut.uci": "Fixture service configuration",
+            "packaging/openwrt/install.sh": "Fixture installer",
+            "packaging/openwrt/install-common.sh": "Fixture installer helper",
+            "packaging/openwrt/install-luci.sh": "Fixture LuCI installer",
+        }.items():
+            path = root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(contents)
+
+    def test_router_package_uses_selected_profile_and_never_the_release_decoy(self):
+        target = "x86_64-unknown-linux-musl"
+        platform = dict(package_release.PLATFORMS[target], profile="router")
+        with tempfile.TemporaryDirectory() as directory, patch.dict(package_release.PLATFORMS, {target: platform}):
+            root = Path(directory)
+            self.write_router_source(root)
+            binary = root / "build-cache" / target / "router/drcom4scut"
+            decoy = root / "build-cache" / target / "release/drcom4scut"
+            binary.parent.mkdir(parents=True)
+            decoy.parent.mkdir(parents=True)
+            binary.write_bytes(elf() + b"selected small router executable")
+            decoy.write_bytes(elf() + b"stale default release executable")
+            with patch.object(package_release.subprocess, "check_output", return_value="drcom4scut 0.4.0\n") as version:
+                archive = package_release.package(root, target, target_dir="build-cache")
+            version.assert_called_once_with([str(binary), "--version"], text=True)
+            with tarfile.open(archive) as output:
+                prefix = f"drcom4scut-0.4.0-{target}/"
+                self.assertEqual(output.extractfile(prefix + "drcom4scut").read(), binary.read_bytes())
+                info = json.load(output.extractfile(prefix + "BUILD-INFO.json"))
+                self.assertEqual(info["build_profile"], "router")
+
+    def test_missing_router_output_fails_without_falling_back_to_release(self):
+        target = "x86_64-unknown-linux-musl"
+        platform = dict(package_release.PLATFORMS[target], profile="router")
+        with tempfile.TemporaryDirectory() as directory, patch.dict(package_release.PLATFORMS, {target: platform}):
+            root = Path(directory)
+            self.write_router_source(root)
+            decoy = root / "target" / target / "release/drcom4scut"
+            decoy.parent.mkdir(parents=True)
+            decoy.write_bytes(elf())
+            with patch.object(package_release.subprocess, "check_output") as version:
+                with self.assertRaisesRegex(ValueError, "Missing router executable"):
+                    package_release.package(root, target)
+            version.assert_not_called()
+            self.assertFalse((root / "dist").exists())
+
     def test_every_published_elf_matches_its_target(self):
         for target, platform in package_release.PLATFORMS.items():
             if platform["format"] == "elf":
@@ -234,8 +287,12 @@ class PackagingTests(unittest.TestCase):
             binary.parent.mkdir(parents=True)
             binary.write_bytes(macho(16777228))
             binary.chmod(0o755)
-            with patch.object(package_release.subprocess, "check_output", return_value="drcom4scut 0.4.1\n"):
+            decoy = root / "target" / target / "router/drcom4scut"
+            decoy.parent.mkdir(parents=True)
+            decoy.write_bytes(macho(16777228) + b"unused router profile")
+            with patch.object(package_release.subprocess, "check_output", return_value="drcom4scut 0.4.1\n") as version:
                 archive = package_release.package(root, target)
+            version.assert_called_once_with([str(binary), "--version"], text=True)
             self.assertTrue(archive.name.endswith(".tar.gz"))
             with tarfile.open(archive) as output:
                 prefix = f"drcom4scut-0.4.1-{target}/"
@@ -243,6 +300,7 @@ class PackagingTests(unittest.TestCase):
                 self.assertEqual(output.getmember(prefix + "drcom4scut").mode & 0o111, 0o111)
                 self.assertEqual(output.extractfile(prefix + "docs/macos.md").read(), b"macOS permissions and use")
                 self.assertFalse(any("openwrt/" in member.name for member in output.getmembers()))
+                self.assertEqual(json.load(output.extractfile(prefix + "BUILD-INFO.json"))["build_profile"], "release")
 
     def test_release_verification_requires_every_native_and_router_platform(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -346,7 +404,8 @@ class PackagingTests(unittest.TestCase):
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text("Fixture installation resource")
             target = "x86_64-unknown-linux-musl"
-            binary = root / "target" / target / "release/drcom4scut"
+            profile = package_release.PLATFORMS[target].get("profile", "release")
+            binary = root / "target" / target / profile / "drcom4scut"
             binary.parent.mkdir(parents=True)
             binary.write_bytes(elf())
             with patch.object(package_release.subprocess, "check_output", return_value="drcom4scut 0.4.0\n"):

@@ -59,6 +59,12 @@ lto = true
 panic = 'abort'
 strip = true
 
+# Router releases retain the same features but optimize for flash footprint.
+[profile.router]
+inherits = "release"
+opt-level = "z"
+codegen-units = 1
+
 [features]
 default = ["log4rs", "portal-tls"]
 portal = []

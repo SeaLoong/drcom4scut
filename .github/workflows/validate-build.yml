@@ -41,7 +41,7 @@ jobs:
           matrix = []
           for platform in platforms:
               target = platform['target']
-              matrix.append({'os': platform['runner'], 'target': target, 'emulator': platform.get('emulator', ''), 'static': platform['openwrt'], 'features': ','.join(platform.get('features', [])), 'npcap_arch': platform.get('npcap_arch', '')})
+              matrix.append({'os': platform['runner'], 'target': target, 'emulator': platform.get('emulator', ''), 'static': platform['openwrt'], 'profile': platform.get('profile', 'release'), 'features': ','.join(platform.get('features', [])), 'npcap_arch': platform.get('npcap_arch', '')})
           print('matrix=' + json.dumps({'include': matrix}))
           PY
 
@@ -113,10 +113,10 @@ jobs:
         run: cargo +stable test --locked --target ${{ matrix.target }} --no-default-features
       - name: Build release
         if: matrix.features == ''
-        run: cargo +stable build --locked --release --target ${{ matrix.target }}
+        run: cargo +stable build --locked --profile '${{ matrix.profile }}' --target ${{ matrix.target }}
       - name: Build static router release
         if: matrix.features != ''
-        run: cargo +stable build --locked --release --target ${{ matrix.target }} --no-default-features --features '${{ matrix.features }}'
+        run: cargo +stable build --locked --profile '${{ matrix.profile }}' --target ${{ matrix.target }} --no-default-features --features '${{ matrix.features }}'
       - name: Build minimal feature executable
         run: cargo +stable build --locked --target ${{ matrix.target }} --no-default-features
       - name: Validate target ABI and package tested executable

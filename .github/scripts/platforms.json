@@ -17,7 +17,8 @@
       "log4rs",
       "portal-tls"
     ],
-    "runner": "ubuntu-24.04"
+    "runner": "ubuntu-24.04",
+    "profile": "router"
   },
   {
     "target": "aarch64-unknown-linux-musl",
@@ -29,7 +30,8 @@
       "log4rs",
       "portal-tls"
     ],
-    "runner": "ubuntu-24.04-arm"
+    "runner": "ubuntu-24.04-arm",
+    "profile": "router"
   },
   {
     "target": "armv5te-unknown-linux-musleabi",
@@ -43,7 +45,8 @@
       "portal-tls"
     ],
     "runner": "ubuntu-24.04",
-    "emulator": "qemu-arm"
+    "emulator": "qemu-arm",
+    "profile": "router"
   },
   {
     "target": "armv7-unknown-linux-musleabi",
@@ -57,7 +60,8 @@
       "portal-tls"
     ],
     "runner": "ubuntu-24.04",
-    "emulator": "qemu-arm"
+    "emulator": "qemu-arm",
+    "profile": "router"
   },
   {
     "target": "riscv64gc-unknown-linux-musl",
@@ -70,7 +74,8 @@
       "portal-tls"
     ],
     "runner": "ubuntu-24.04",
-    "emulator": "qemu-riscv64"
+    "emulator": "qemu-riscv64",
+    "profile": "router"
   },
   {
     "target": "x86_64-pc-windows-msvc",

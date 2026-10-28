@@ -1,4 +1,4 @@
-"""Check executable ABI/version, then package the exact tested release binary."""
+"""Check executable ABI/version, then package the exact tested profile binary."""
 
 import argparse
 import hashlib
@@ -103,7 +103,10 @@ def package(root, target, runner=(), target_dir=None):
     target_dir = root / "target" if target_dir is None else pathlib.Path(target_dir)
     if not target_dir.is_absolute():
         target_dir = root / target_dir
-    binary = target_dir / target / "release" / binary_name
+    profile = platform.get("profile", "release")
+    binary = target_dir / target / profile / binary_name
+    if not binary.is_file():
+        raise ValueError(f"Missing {profile} executable for {target}: {binary}")
     verify_abi(binary, platform)
     if "arm_arch" in platform:
         # ARMv5TE and ARMv7 share e_machine. Verify attributes too, rather than
@@ -125,7 +128,7 @@ def package(root, target, runner=(), target_dir=None):
         contents.mkdir()
         (contents / "BUILD-INFO.json").write_text(json.dumps({
             "version": version, "target": target, "source_commit": commit,
-            "source_dirty": dirty, "openwrt": platform["openwrt"],
+            "source_dirty": dirty, "openwrt": platform["openwrt"], "build_profile": profile,
         }, indent=2) + "\n", encoding="utf-8")
         for source, name in (
             (binary, binary_name), (root / "README.md", "README.md"),
