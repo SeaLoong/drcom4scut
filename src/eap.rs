@@ -44,6 +44,7 @@ struct ProcessData {
     md5: Vec<u8>,
     response_identity_packet: Option<Vec<u8>>,
     challenge_id: Option<u8>,
+    last_response_id: Option<u8>,
 }
 
 struct PendingPacket {
@@ -155,6 +156,7 @@ impl<'a, T: Transport> Process<'a, T> {
         self.heartbeat = None;
         self.data.md5.clear();
         self.data.challenge_id = None;
+        self.data.last_response_id = None;
         self.data.response_identity_packet = None;
         self.eth_header.destination = MULTICAST_MAC;
         self.notify(State::Stop);
@@ -260,6 +262,7 @@ impl<'a, T: Transport> Process<'a, T> {
             eap_codes::REQUEST => match eap.eap_type {
                 Some(EAPType::Identity) => {
                     self.pending = None;
+                    self.data.last_response_id = Some(eap.identifier);
                     if self.heartbeat.is_some() {
                         self.heartbeat = Some(Instant::now() + self.heartbeat_duration());
                     }
@@ -303,6 +306,7 @@ impl<'a, T: Transport> Process<'a, T> {
                     self.heartbeat = None;
                     self.notify(State::Stop);
                     self.data.challenge_id = Some(eap.identifier);
+                    self.data.last_response_id = Some(eap.identifier);
                     let challenge = &rest[..usize::from(size)];
                     let packet = self.md5_packet(eap.identifier, challenge);
                     self.send(packet, true).await?;
@@ -337,7 +341,9 @@ impl<'a, T: Transport> Process<'a, T> {
                 info!("802.1X Authorization success!");
                 self.notify(State::Success);
             }
-            eap_codes::FAILURE if self.data.challenge_id == Some(eap.identifier) => {
+            // Identity heartbeats advance the response identifier after MD5
+            // authentication; an old challenge failure is then stale.
+            eap_codes::FAILURE if self.data.last_response_id == Some(eap.identifier) => {
                 debug!("EAP authentication failure.");
                 return Ok(Some(State::Stop));
             }
@@ -593,7 +599,7 @@ mod tests {
             assert_eq!(heartbeat[19], 3);
             assert_eq!(&heartbeat[23..], &identity[23..]);
             server
-                .send(frame(eap_codes::FAILURE, 2, None, &[]))
+                .send(frame(eap_codes::FAILURE, 3, None, &[]))
                 .await
                 .unwrap();
         };
@@ -958,6 +964,59 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(process.heartbeat, deadline); // duplicate SUCCESS cannot extend liveness
+    }
+
+    #[tokio::test]
+    async fn failures_match_latest_response_after_authenticated_identity_heartbeat() {
+        let settings = settings();
+        let (link, _server, mut outgoing) = link();
+        let (tx, state) = watch();
+        let mut process = process(&settings, link, tx);
+        process
+            .handle_packet(&frame(eap_codes::REQUEST, 1, Some(EAPType::Identity), &[]))
+            .await
+            .unwrap();
+        outgoing.recv().await.unwrap();
+        let mut challenge = vec![16];
+        challenge.extend_from_slice(&[7; 16]);
+        process
+            .handle_packet(&frame(
+                eap_codes::REQUEST,
+                2,
+                Some(EAPType::Md5Challenge),
+                &challenge,
+            ))
+            .await
+            .unwrap();
+        outgoing.recv().await.unwrap();
+        process
+            .handle_packet(&frame(eap_codes::SUCCESS, 2, None, &[]))
+            .await
+            .unwrap();
+        assert_eq!(state.borrow().state, State::Success);
+        process
+            .handle_packet(&frame(eap_codes::REQUEST, 3, Some(EAPType::Identity), &[]))
+            .await
+            .unwrap();
+        assert_eq!(outgoing.recv().await.unwrap()[19], 3);
+
+        assert_eq!(
+            process
+                .handle_packet(&frame(eap_codes::FAILURE, 2, None, &[]))
+                .await
+                .unwrap(),
+            None,
+            "the old MD5 identifier cannot terminate a later heartbeat exchange"
+        );
+        assert_eq!(state.borrow().state, State::Success);
+        assert_eq!(
+            process
+                .handle_packet(&frame(eap_codes::FAILURE, 3, None, &[]))
+                .await
+                .unwrap(),
+            Some(State::Stop),
+            "failure of the latest Identity response must terminate immediately"
+        );
     }
 
     #[tokio::test]

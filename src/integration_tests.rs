@@ -303,7 +303,7 @@ async fn e2e_expired_udp_session_is_refreshed_while_eap_stays_authenticated() {
             from_client.try_recv().is_err(),
             "UDP recovery sends no EAP Logoff/Start"
         );
-        to_client.send(frame(4, 2, &[])).await.unwrap();
+        to_client.send(frame(4, 12, &[])).await.unwrap();
     };
     let (eap_state, ()) = timeout(Duration::from_secs(60), async {
         tokio::join!(eap.start(), async {

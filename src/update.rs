@@ -477,14 +477,20 @@ async fn check_with(
 pub async fn apply_latest(options: &UpdateOptions) -> Result<UpdateOutcome, UpdateError> {
     let transport = Transport::new(options)?;
     let target = target_named(env!("DRCOM_BUILD_TARGET"))?;
+    let executable = std::env::current_exe()?.canonicalize()?;
+    let inspected = executable.clone();
+    let original_digest = tokio::task::spawn_blocking(move || executable_digest(&inspected))
+        .await
+        .map_err(|_| invalid("cannot inspect the executable while preparing the update"))??;
     let Some(release) = check_with(&transport, env!("CARGO_PKG_VERSION"), target).await? else {
         return Ok(UpdateOutcome::UpToDate);
     };
     let binary = download_binary(&transport, &release).await?;
-    let executable = std::env::current_exe()?.canonicalize()?;
-    tokio::task::spawn_blocking(move || install_binary(&executable, &binary))
-        .await
-        .map_err(|_| invalid("update installer task failed"))??;
+    tokio::task::spawn_blocking(move || {
+        install_checked(&executable, &binary, Some(original_digest), || Ok(()))
+    })
+    .await
+    .map_err(|_| invalid("update installer task failed"))??;
     Ok(UpdateOutcome::Updated {
         version: release.version,
         restart_required: true,
@@ -1056,13 +1062,160 @@ fn sync_directory(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
+#[cfg(test)]
 fn install_binary(executable: &Path, binary: &[u8]) -> Result<(), UpdateError> {
     install_with(executable, binary, || Ok(()))
 }
 
+fn executable_digest(path: &Path) -> Result<[u8; 32], UpdateError> {
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        options.custom_flags(0x0020_0000); // FILE_FLAG_OPEN_REPARSE_POINT
+    }
+    let mut file = options.open(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() {
+        return Err(invalid(
+            "update destination must remain a regular executable",
+        ));
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        if metadata.file_attributes() & 0x400 != 0 {
+            return Err(invalid("update destination must not be a reparse point"));
+        }
+    }
+    let mut hash = Sha256::new();
+    let mut buffer = [0u8; 65536];
+    loop {
+        let length = file.read(&mut buffer)?;
+        if length == 0 {
+            break;
+        }
+        hash.update(&buffer[..length]);
+    }
+    Ok(hash.finalize().into())
+}
+
+/// Share the GUI installer's persistent directory lock. Removing this pathname
+/// after use would allow two processes to lock different inodes concurrently.
+fn install_lock(executable: &Path, original: &fs::Metadata) -> Result<fs::File, UpdateError> {
+    let parent = executable
+        .parent()
+        .ok_or_else(|| invalid("update destination has no parent directory"))?;
+    let path = parent.join(".drcom-update.lock");
+    let mut options = fs::OpenOptions::new();
+    options.read(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        // O_NONBLOCK also prevents an unsafe FIFO from hanging before fstat.
+        options
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        // OPEN_REPARSE_POINT avoids following a final symlink; omitting
+        // FILE_SHARE_DELETE keeps the locked pathname from being replaced.
+        options.custom_flags(0x0020_0000).share_mode(0x0000_0003);
+    }
+    let opened = options.create_new(true).open(&path);
+    let (file, created) = match opened {
+        Ok(file) => (file, true),
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+            (options.create_new(false).create(false).open(&path).map_err(|_| {
+                invalid("cannot open update transaction lock; another update may be active or its permissions are unsafe")
+            })?, false)
+        }
+        Err(_) => return Err(invalid("cannot create update transaction lock; another update may be active or directory permissions are unsafe")),
+    };
+    #[cfg(unix)]
+    {
+        use std::os::{fd::AsRawFd, unix::fs::MetadataExt};
+        // An elevated update of a user-owned installation must not leave a
+        // root-owned 0600 lock that the GUI's normal user cannot reuse.
+        let staged = file.metadata()?;
+        if created && (staged.uid() != original.uid() || staged.gid() != original.gid()) {
+            // SAFETY: live descriptor and identities from the original file.
+            if unsafe { libc::fchown(file.as_raw_fd(), original.uid(), original.gid()) } != 0 {
+                return Err(invalid("cannot preserve installation lock ownership"));
+            }
+        }
+        validate_unix_install_lock(&path, &file, original)?;
+    }
+    #[cfg(windows)]
+    {
+        let _ = (original, created);
+        windows::validate_install_lock(&file, executable)?;
+    }
+    match file.try_lock() {
+        Ok(()) => (),
+        Err(fs::TryLockError::WouldBlock) => {
+            return Err(invalid(
+                "another update in this installation directory is already in progress",
+            ));
+        }
+        Err(fs::TryLockError::Error(_)) => {
+            return Err(invalid("cannot acquire the installation update lock"));
+        }
+    }
+    #[cfg(unix)]
+    validate_unix_install_lock(&path, &file, original)?;
+    Ok(file)
+}
+
+#[cfg(unix)]
+fn validate_unix_install_lock(
+    path: &Path,
+    file: &fs::File,
+    original: &fs::Metadata,
+) -> Result<(), UpdateError> {
+    use std::os::unix::fs::MetadataExt;
+    let opened = file.metadata()?;
+    let named = fs::symlink_metadata(path)?;
+    // SAFETY: geteuid has no borrowed resources or output pointers.
+    let current = unsafe { libc::geteuid() };
+    if !opened.is_file()
+        || !named.is_file()
+        || named.file_type().is_symlink()
+        || opened.nlink() != 1
+        || named.nlink() != 1
+        || opened.mode() & 0o777 != 0o600
+        || (opened.uid() != current && opened.uid() != original.uid())
+        || opened.dev() != named.dev()
+        || opened.ino() != named.ino()
+    {
+        return Err(invalid(
+            "update transaction lock must be a private, singly linked regular file owned by the current user or executable owner",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
 fn install_with(
     executable: &Path,
     binary: &[u8],
+    after_replace: impl FnOnce() -> io::Result<()>,
+) -> Result<(), UpdateError> {
+    install_checked(executable, binary, None, after_replace)
+}
+
+fn install_checked(
+    executable: &Path,
+    binary: &[u8],
+    expected_digest: Option<[u8; 32]>,
     after_replace: impl FnOnce() -> io::Result<()>,
 ) -> Result<(), UpdateError> {
     let original = fs::symlink_metadata(executable)?;
@@ -1072,6 +1225,20 @@ fn install_with(
     let parent = executable
         .parent()
         .ok_or_else(|| invalid("update destination has no parent directory"))?;
+    let _gate = install_lock(executable, &original)?;
+    // A cooperating installer may have completed just before we acquired the
+    // gate. Take its current metadata while the transaction is exclusively ours.
+    let original = fs::symlink_metadata(executable)?;
+    if !original.is_file() || original.file_type().is_symlink() {
+        return Err(invalid("update destination must be a regular executable"));
+    }
+    if let Some(expected) = expected_digest
+        && executable_digest(executable)? != expected
+    {
+        return Err(invalid(
+            "installed executable changed while preparing the update; check for updates again",
+        ));
+    }
     let staging = tempfile::Builder::new().prefix(".drcom4scut-update-").tempdir_in(parent)
         .map_err(|_| invalid("cannot create update staging directory beside the executable; check directory permissions or retry as administrator"))?;
     let replacement = staging.path().join("replacement");
@@ -1835,6 +2002,188 @@ mod tests {
     }
 
     #[test]
+    fn concurrent_installations_cannot_be_overwritten_by_another_transactions_rollback() {
+        let directory = tempfile::tempdir().unwrap();
+        let core = directory.path().join("core");
+        let gui = directory.path().join("gui");
+        fs::write(&core, b"original core").unwrap();
+        fs::write(&gui, b"original gui").unwrap();
+        let result = install_with(&core, b"first update", || {
+            for executable in [&core, &gui] {
+                let error = install_binary(executable, b"conflicting update").unwrap_err();
+                assert!(error.to_string().contains("already in progress"));
+            }
+            assert_eq!(fs::read(&core).unwrap(), b"first update");
+            assert_eq!(fs::read(&gui).unwrap(), b"original gui");
+            Err(io::Error::other("injected first transaction failure"))
+        });
+        assert!(result.is_err());
+        assert_eq!(fs::read(&core).unwrap(), b"original core");
+        assert_eq!(fs::read(&gui).unwrap(), b"original gui");
+        assert!(directory.path().join(".drcom-update.lock").is_file());
+        install_binary(&core, b"next update").unwrap();
+        assert_eq!(fs::read(&core).unwrap(), b"next update");
+    }
+
+    #[test]
+    fn prepared_update_rejects_an_executable_replaced_while_downloading() {
+        let directory = tempfile::tempdir().unwrap();
+        let executable = directory.path().join("core");
+        fs::write(&executable, b"original core").unwrap();
+        let prepared_digest = executable_digest(&executable).unwrap();
+
+        install_binary(&executable, b"newer update from another installer").unwrap();
+        let metadata = fs::symlink_metadata(&executable).unwrap();
+        let gate = install_lock(&executable, &metadata).unwrap();
+        let busy = install_checked(
+            &executable,
+            b"stale download",
+            Some(prepared_digest),
+            || panic!("an installer without the transaction lock must not replace the executable"),
+        )
+        .unwrap_err();
+        assert!(busy.to_string().contains("already in progress"));
+        drop(gate);
+
+        let stale = install_checked(
+            &executable,
+            b"stale download",
+            Some(prepared_digest),
+            || panic!("a stale prepared update must not replace the executable"),
+        )
+        .unwrap_err();
+        assert!(stale.to_string().contains("changed while preparing"));
+        assert_eq!(
+            fs::read(&executable).unwrap(),
+            b"newer update from another installer"
+        );
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 2);
+
+        let current_digest = executable_digest(&executable).unwrap();
+        install_checked(&executable, b"fresh download", Some(current_digest), || {
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(fs::read(&executable).unwrap(), b"fresh download");
+    }
+
+    #[test]
+    fn installation_lock_child() {
+        let Some(directory) = std::env::var_os("DRCOM_UPDATE_TEST_LOCK_PRIVATE") else {
+            return;
+        };
+        let directory = Path::new(&directory);
+        let executable = directory.join("core");
+        if std::env::var_os("DRCOM_UPDATE_TEST_EXPECT_LOCKED").is_some() {
+            let error = install_binary(&executable, b"child update").unwrap_err();
+            assert!(error.to_string().contains("already in progress"));
+            assert_eq!(fs::read(&executable).unwrap(), b"original");
+        } else {
+            install_binary(&executable, b"child update").unwrap();
+        }
+    }
+
+    #[test]
+    fn installation_lock_coordinates_real_processes_and_is_reusable_after_release() {
+        let directory = tempfile::tempdir().unwrap();
+        let executable = directory.path().join("core");
+        fs::write(&executable, b"original").unwrap();
+        let gate = install_lock(&executable, &fs::metadata(&executable).unwrap()).unwrap();
+        let child = |expect_locked| {
+            let test_image = std::env::current_exe().unwrap();
+            let mut command = if let Some(runner) =
+                std::env::var_os("DRCOM_TEST_RUNNER").filter(|runner| !runner.is_empty())
+            {
+                let mut command = std::process::Command::new(runner);
+                command.arg(test_image);
+                command
+            } else {
+                std::process::Command::new(test_image)
+            };
+            command
+                .args(["--exact", "update::tests::installation_lock_child"])
+                .env("DRCOM_UPDATE_TEST_LOCK_PRIVATE", directory.path())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped());
+            if expect_locked {
+                command.env("DRCOM_UPDATE_TEST_EXPECT_LOCKED", "1");
+            } else {
+                command.env_remove("DRCOM_UPDATE_TEST_EXPECT_LOCKED");
+            }
+            let mut child = command.spawn().unwrap();
+            let deadline = std::time::Instant::now() + Duration::from_secs(30);
+            while child.try_wait().unwrap().is_none() {
+                if std::time::Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    panic!("installation lock child did not finish");
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            let output = child.wait_with_output().unwrap();
+            assert!(
+                output.status.success(),
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        child(true);
+        assert_eq!(fs::read(&executable).unwrap(), b"original");
+        drop(gate);
+        child(false);
+        assert_eq!(fs::read(&executable).unwrap(), b"child update");
+        assert!(directory.path().join(".drcom-update.lock").is_file());
+    }
+
+    #[test]
+    fn installation_lock_rejects_hardlinks_without_modifying_the_linked_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let executable = directory.path().join("core");
+        let unrelated = directory.path().join("unrelated");
+        fs::write(&executable, b"original").unwrap();
+        fs::write(&unrelated, b"unrelated data").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&unrelated, fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        fs::hard_link(&unrelated, directory.path().join(".drcom-update.lock")).unwrap();
+        assert!(install_binary(&executable, b"replacement").is_err());
+        assert_eq!(fs::read(&executable).unwrap(), b"original");
+        assert_eq!(fs::read(unrelated).unwrap(), b"unrelated data");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn installation_lock_rejects_symlinks_shared_permissions_and_special_files() {
+        use std::os::unix::{ffi::OsStrExt, fs::PermissionsExt};
+        let directory = tempfile::tempdir().unwrap();
+        let executable = directory.path().join("core");
+        let unrelated = directory.path().join("unrelated");
+        let lock = directory.path().join(".drcom-update.lock");
+        fs::write(&executable, b"original").unwrap();
+        fs::write(&unrelated, b"unrelated data").unwrap();
+        std::os::unix::fs::symlink(&unrelated, &lock).unwrap();
+        assert!(install_binary(&executable, b"replacement").is_err());
+        assert_eq!(fs::read(&unrelated).unwrap(), b"unrelated data");
+        fs::remove_file(&lock).unwrap();
+        fs::write(&lock, b"existing lock contents").unwrap();
+        fs::set_permissions(&lock, fs::Permissions::from_mode(0o666)).unwrap();
+        assert!(install_binary(&executable, b"replacement").is_err());
+        assert_eq!(fs::read(&lock).unwrap(), b"existing lock contents");
+        fs::remove_file(&lock).unwrap();
+        fs::create_dir(&lock).unwrap();
+        assert!(install_binary(&executable, b"replacement").is_err());
+        fs::remove_dir(&lock).unwrap();
+        let name = std::ffi::CString::new(lock.as_os_str().as_bytes()).unwrap();
+        // SAFETY: a valid NUL-terminated path in our private test directory.
+        assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+        assert!(install_binary(&executable, b"replacement").is_err());
+        assert_eq!(fs::read(&executable).unwrap(), b"original");
+    }
+
+    #[test]
     fn running_image_waiter() {
         // Only the copied test harness reads this test-only rendezvous path.
         let Some(directory) = std::env::var_os("DRCOM_UPDATE_TEST_WAITER_PRIVATE") else {
@@ -2018,10 +2367,16 @@ mod tests {
             fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
         }
         install_binary(&executable, &binary).unwrap();
-        let output = std::process::Command::new(executable)
-            .arg("--version")
-            .output()
-            .unwrap();
+        let mut command = if let Some(runner) =
+            std::env::var_os("DRCOM_TEST_RUNNER").filter(|runner| !runner.is_empty())
+        {
+            let mut command = std::process::Command::new(runner);
+            command.arg(&executable);
+            command
+        } else {
+            std::process::Command::new(&executable)
+        };
+        let output = command.arg("--version").output().unwrap();
         assert!(output.status.success());
         assert_eq!(
             String::from_utf8(output.stdout).unwrap().trim(),

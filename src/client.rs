@@ -539,7 +539,11 @@ async fn run_portal(
     // already been dropped, so its pending HTTP request/hook is canceled first.
     if !matches!(outcome, Ok(true)) {
         if cleanup_logout_allowed {
-            let _ = tokio::time::timeout(Duration::from_secs(1), client.logout()).await;
+            let _ = tokio::time::timeout(
+                Duration::from_secs(1),
+                client.logout_for(&settings.username),
+            )
+            .await;
         }
         connection_hooks.ip = current_ip;
         connection_hooks.finish(settings).await?;

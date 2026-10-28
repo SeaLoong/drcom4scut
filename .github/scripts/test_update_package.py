@@ -26,7 +26,8 @@ def test_package(target, features=""):
     if not re.fullmatch(r"[0-9a-f]{40}", source):
         raise RuntimeError("The updater package test requires the full source commit")
     environment = dict(os.environ, DRCOM_UPDATE_TEST_ARCHIVE=str(archive), DRCOM_UPDATE_TEST_SOURCE=source)
-    command = ["cargo", "+stable", "test", "--locked", "--target", target]
+    # Respect RUSTUP_TOOLCHAIN, including the verified custom MIPS std sysroot.
+    command = ["cargo", "test", "--locked", "--target", target]
     if features:
         command.extend(["--no-default-features", "--features", features])
     command.extend(["--lib", TEST, "--", "--exact"])

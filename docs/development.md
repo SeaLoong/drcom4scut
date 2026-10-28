@@ -25,12 +25,14 @@ cargo build --locked --release
 cargo fmt --all -- --check
 cargo clippy --locked --all-targets --all-features -- -D warnings
 cargo clippy --locked --all-targets --no-default-features -- -D warnings
+cargo clippy --locked --all-targets --no-default-features --features portal -- -D warnings
 cargo test --locked
 cargo test --locked --no-default-features
+cargo test --locked --no-default-features --features portal
 ./target/release/drcom4scut --version
 ```
 
-上面的命令依次生成发布程序、检查格式、检查代码问题、运行默认和精简测试，最后确认版本。`-D warnings` 表示把代码警告也当作检查失败处理。
+上面的命令依次生成发布程序、检查格式、检查代码问题、运行默认、精简及仅 HTTP Portal 特性组合的测试，最后确认版本。`-D warnings` 表示把代码警告也当作检查失败处理。
 
 默认构建的 HTTPS 加密连接部分需要本机 C 编译工具。Windows 还需 [Npcap SDK 1.15](https://npcap.com/dist/npcap-sdk-1.15.zip) 的匹配架构库：x64 使用 `Lib/x64`，ARM64 使用 `Lib/ARM64`，其中均包含 `Packet.lib` 和 `wpcap.lib`。将所选目录加入 `LIB`，并设置 `LIBPCAP_LIBDIR`。CI 使用[固定 SDK 安装步骤](https://github.com/SeaLoong/drcom4scut/blob/master/.github/actions/setup-npcap/action.yml)，保留正常 TLS 校验。MSVC 在 `build.rs` 中延迟加载捕获 DLL；真实抓包仍需安装 Npcap。
 

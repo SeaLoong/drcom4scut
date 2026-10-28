@@ -261,6 +261,25 @@ impl PortalClient {
 
     pub async fn logout(&self) -> Result<PortalStatus, PortalError> {
         let identity = self.identity().await?;
+        self.logout_identity(identity).await
+    }
+
+    /// Automatic cleanup must inspect the current owner, including when the
+    /// login future was cancelled before its initial status response arrived.
+    /// An explicit user-requested logout retains the unconditional API above.
+    pub(crate) async fn logout_for(&self, username: &str) -> Result<PortalStatus, PortalError> {
+        let identity = self.identity().await?;
+        let status = self
+            .online_status(identity.clone())
+            .await?
+            .require_account(username)?;
+        if !status.online {
+            return Ok(status);
+        }
+        self.logout_identity(identity).await
+    }
+
+    async fn logout_identity(&self, identity: Identity) -> Result<PortalStatus, PortalError> {
         let mut url = self.endpoint("eportal/portal/logout", true)?;
         url.query_pairs_mut().extend_pairs([
             ("callback", CALLBACK.to_owned()),
@@ -1118,6 +1137,129 @@ mod tests {
                     || path.starts_with("/eportal/portal/online_list?")
             }));
         }
+    }
+
+    #[cfg(feature = "log4rs")]
+    #[tokio::test]
+    async fn cancelling_initial_login_does_not_log_out_an_unobserved_foreign_account() {
+        let first_status = Arc::new(AtomicBool::new(true));
+        let observed = Arc::new(tokio::sync::Notify::new());
+        let gate = Arc::new(tokio::sync::Notify::new());
+        let seen = observed.clone();
+        let release = gate.clone();
+        let server = mock(move |path| {
+            if path.starts_with("/drcom/") {
+                identity()
+            } else if path.starts_with("/eportal/portal/online_list?") {
+                let mut reply = online_account(Some("other-student@wifi"));
+                if first_status.swap(false, Ordering::SeqCst) {
+                    seen.notify_one();
+                    reply.release = Some(release.clone());
+                }
+                reply
+            } else {
+                Reply::json(r#"{"result":1}"#)
+            }
+        })
+        .await;
+        let mut settings = crate::Settings {
+            mode: crate::settings::Mode::Portal,
+            username: "student".into(),
+            password: "synthetic-test-password".into(),
+            portal_base: server.config.base_url.clone(),
+            portal_api: server.config.api_url.clone(),
+            portal_ac_ip: server.config.ac_ip,
+            portal_allow_http: true,
+            ..Default::default()
+        };
+        settings.log.level_filter = log::LevelFilter::Off;
+        settings.update.enabled = false;
+        let (stop, stopped) = watch::channel(false);
+        let connection = crate::client::run(settings, stopped);
+        tokio::pin!(connection);
+        tokio::select! {
+            _ = observed.notified() => (),
+            result = &mut connection => panic!("initial status must still be pending: {result:?}"),
+            _ = tokio::time::sleep(Duration::from_secs(5)) => panic!("mock did not receive the initial status request"),
+        }
+        stop.send_replace(true);
+        tokio::time::timeout(Duration::from_secs(5), connection)
+            .await
+            .expect("cancelled login did not finish")
+            .unwrap();
+        gate.notify_waiters();
+        assert!(
+            !server
+                .paths
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|path| path.starts_with("/eportal/portal/logout?")),
+            "automatic cleanup must not disconnect a different account"
+        );
+    }
+
+    #[tokio::test]
+    async fn automatic_logout_preserves_foreign_and_already_offline_sessions() {
+        for foreign in [false, true] {
+            let server = mock(move |path| {
+                if path.starts_with("/drcom/") {
+                    identity()
+                } else if foreign {
+                    online_account(Some("other-student@wifi"))
+                } else {
+                    offline()
+                }
+            })
+            .await;
+            let client = PortalClient::new(server.config.clone()).unwrap();
+            let status = client.logout_for("student").await;
+            if foreign {
+                assert_eq!(status, Err(PortalError::AccountMismatch));
+            } else {
+                assert!(!status.unwrap().online);
+            }
+            assert!(
+                !server
+                    .paths
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .any(|path| path.starts_with("/eportal/portal/logout?"))
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn automatic_logout_disconnects_a_matching_account_and_confirms_it() {
+        let connected = Arc::new(AtomicBool::new(true));
+        let state = connected.clone();
+        let server = mock(move |path| {
+            if path.starts_with("/drcom/") {
+                identity()
+            } else if path.starts_with("/eportal/portal/logout?") {
+                state.store(false, Ordering::SeqCst);
+                Reply::json(r#"{"result":1}"#)
+            } else if state.load(Ordering::SeqCst) {
+                online_account(Some("student@wifi"))
+            } else {
+                offline()
+            }
+        })
+        .await;
+        let client = PortalClient::new(server.config.clone()).unwrap();
+        assert!(!client.logout_for("student").await.unwrap().online);
+        assert!(!connected.load(Ordering::SeqCst));
+        assert_eq!(
+            server
+                .paths
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|path| path.starts_with("/eportal/portal/logout?"))
+                .count(),
+            1
+        );
     }
 
     #[tokio::test]

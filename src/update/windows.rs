@@ -1,7 +1,10 @@
 //! Copy the original file's owner, group and access rules before replacement.
 use std::{
     fs,
-    os::windows::{fs::OpenOptionsExt, io::AsRawHandle},
+    os::windows::{
+        fs::OpenOptionsExt,
+        io::{AsRawHandle, FromRawHandle, OwnedHandle},
+    },
     path::Path,
     ptr,
 };
@@ -12,10 +15,12 @@ use windows_sys::Win32::{
         ACL,
         Authorization::{GetSecurityInfo, SE_FILE_OBJECT, SetSecurityInfo},
         DACL_SECURITY_INFORMATION, EqualSid, GROUP_SECURITY_INFORMATION,
-        GetSecurityDescriptorControl, OWNER_SECURITY_INFORMATION,
+        GetSecurityDescriptorControl, GetTokenInformation, OWNER_SECURITY_INFORMATION,
         PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SE_DACL_PROTECTED,
-        UNPROTECTED_DACL_SECURITY_INFORMATION,
+        TOKEN_OWNER, TOKEN_QUERY, TokenOwner, UNPROTECTED_DACL_SECURITY_INFORMATION,
     },
+    Storage::FileSystem::{BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle},
+    System::Threading::{GetCurrentProcess, OpenProcessToken},
 };
 
 use super::{UpdateError, invalid};
@@ -46,6 +51,10 @@ impl FileSecurity {
         let file = fs::OpenOptions::new()
             .access_mode(READ_CONTROL)
             .open(path)?;
+        Self::from_file(&file)
+    }
+
+    fn from_file(file: &fs::File) -> Result<Self, UpdateError> {
         let mut descriptor = ptr::null_mut();
         let mut dacl = ptr::null_mut();
         let mut owner = ptr::null_mut();
@@ -173,6 +182,72 @@ fn sid_matches(expected: PSID, actual: PSID) -> bool {
 
 pub(super) fn preserve_security(original: &Path, staged: &Path) -> Result<(), UpdateError> {
     FileSecurity::read(original)?.apply(staged)
+}
+
+pub(super) fn validate_install_lock(file: &fs::File, executable: &Path) -> Result<(), UpdateError> {
+    // SAFETY: this OS output structure contains integer fields only.
+    let mut information: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+    // SAFETY: live file handle and valid output storage.
+    if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut information) } == 0
+        || !file.metadata()?.is_file()
+        || information.dwFileAttributes & 0x400 != 0
+        || information.nNumberOfLinks != 1
+    {
+        return Err(invalid(
+            "update transaction lock must be a singly linked regular file, not a reparse point",
+        ));
+    }
+    let lock = FileSecurity::from_file(file)?;
+    let original = FileSecurity::read(executable)?;
+    if sid_matches(original.owner, lock.owner) {
+        return Ok(());
+    }
+    let mut token = ptr::null_mut();
+    // The token's default owner may be Administrators for an elevated process,
+    // so query TokenOwner rather than assuming every new file uses TokenUser.
+    // SAFETY: valid pseudo process handle and writable output slot.
+    if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) } == 0 {
+        return Err(invalid("cannot verify update transaction lock owner"));
+    }
+    // SAFETY: OpenProcessToken returned a uniquely owned real handle.
+    let token = unsafe { OwnedHandle::from_raw_handle(token) };
+    let mut length = 0;
+    // SAFETY: null output with zero capacity queries the required buffer size.
+    unsafe {
+        GetTokenInformation(
+            token.as_raw_handle(),
+            TokenOwner,
+            ptr::null_mut(),
+            0,
+            &mut length,
+        );
+    }
+    if (length as usize) < std::mem::size_of::<TOKEN_OWNER>() || length > 65536 {
+        return Err(invalid("cannot verify update transaction lock owner"));
+    }
+    let mut storage = vec![0usize; (length as usize).div_ceil(std::mem::size_of::<usize>())];
+    // SAFETY: aligned storage has the requested capacity and remains live while
+    // its embedded owner SID is compared below.
+    if unsafe {
+        GetTokenInformation(
+            token.as_raw_handle(),
+            TokenOwner,
+            storage.as_mut_ptr().cast(),
+            length,
+            &mut length,
+        )
+    } == 0
+    {
+        return Err(invalid("cannot verify update transaction lock owner"));
+    }
+    // SAFETY: GetTokenInformation initialized an aligned TOKEN_OWNER record.
+    let owner = unsafe { (*storage.as_ptr().cast::<TOKEN_OWNER>()).Owner };
+    if owner.is_null() || !sid_matches(owner, lock.owner) {
+        return Err(invalid(
+            "update transaction lock belongs to an untrusted owner",
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

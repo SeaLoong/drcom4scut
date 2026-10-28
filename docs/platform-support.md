@@ -63,7 +63,7 @@ qemu-arm ./target/armv7-unknown-linux-musleabi/router/drcom4scut --version
 
 ### 同架构的体积实测
 
-2026-10-28 使用 Rust 1.99.1，在同一 x86-64 Linux 主机上对相同完整功能进行比较；musl C 编译工具来自 Debian musl 1.2.5，Rust 标准库来自该工具链的官方目标组件。gzip 使用级别 9，仅压缩单个程序，不包含文档、服务脚本或 GUI：
+2026-10-28 使用 Rust 1.99.1 和平台扩展提交 `1bb0126` 的源码，在同一 x86-64 Linux 主机上对相同完整功能进行比较；musl C 编译工具来自 Debian musl 1.2.5，Rust 标准库来自该工具链的官方目标组件。gzip 使用级别 9，仅压缩单个程序，不包含文档、服务脚本或 GUI：
 
 | 目标与构建配置 | 程序文件 | 单程序 gzip |
 | --- | ---: | ---: |
@@ -103,7 +103,9 @@ i586 也出现在 Rust 的目标列表中，但当前 TLS 依赖的实际构建�
 
 ## 怎样理解验证结果
 
-2026-10-28，本轮新增的 i686、ARMv6 软/硬浮点、ARMv7 硬浮点、LoongArch64、大小端 PowerPC64、MIPS/MIPSel 共 9 个目标，均已生成完整功能程序，并在清单指定的 QEMU CPU 上通过完整与精简功能测试。MIPS/MIPSel 在最终源码上分别通过完整功能 214 项、精简功能 180 项测试。最终优化产物重新构建后通过 ABI、版本和私有配置检查，9 个实际归档也确认只有核心与 OpenWrt 服务/LuCI 资源，没有 GUI 或 .NET 运行时。
+2026-10-28，平台扩展新增的 i686、ARMv6 软/硬浮点、ARMv7 硬浮点、LoongArch64、大小端 PowerPC64、MIPS/MIPSel 共 9 个目标，均已生成完整功能程序，并在清单指定的 QEMU CPU 上通过完整与精简功能测试。MIPS/MIPSel 在平台扩展提交 `1bb0126` 上分别通过完整功能 214 项、精简功能 180 项测试；后续功能修复会增加回归用例，以对应提交的 CI 为准。优化产物通过 ABI、版本和私有配置检查，9 个实际归档也确认只有核心与 OpenWrt 服务/LuCI 资源，没有 GUI 或 .NET 运行时。
+
+CI 为大端 MIPS 与 PowerPC64 使用固定、校验 SHA-256 的静态 QEMU 10.0.13，见[模拟器准备脚本](https://github.com/SeaLoong/drcom4scut/blob/master/.github/scripts/setup_qemu.py)。Ubuntu 24.04 自带 QEMU 8.2 在这两个目标上处理跨端序 netlink 响应时，会使网卡枚举挂起；同一程序换用 QEMU 10 后可正常完成。此处通过更新模拟器解决，保留网卡枚举、协议和 CLI 测试。20 个目标的实际发布归档还会通过核心更新器安装，并执行安装后的版本检查；交叉目标的子进程使用相同 CPU runner。
 
 强化后的 ABI 校验还验证了此前正式版的 11 个真实核心组件，均保持兼容；不会为了接受新架构而放松动态加载器、端序或浮点 ABI 检查。这些是构建、模拟器与产物验证结果，尚不代表新增目标已经在具体 OpenWrt 硬件或校园网络上通过验收。
 

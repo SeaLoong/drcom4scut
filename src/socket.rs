@@ -36,10 +36,12 @@ pub async fn resolve_dns_from(settings: &Settings, source: IpAddr) -> Option<(Ip
         };
     }
     for address in &settings.dns {
-        let mut server = NameServerConfig::udp(address.ip());
+        let mut server = NameServerConfig::udp_and_tcp(address.ip());
         server.trust_negative_responses = false;
-        server.connections[0].port = address.port();
-        server.connections[0].bind_addr = Some(SocketAddr::new(source, 0));
+        for connection in &mut server.connections {
+            connection.port = address.port();
+            connection.bind_addr = Some(SocketAddr::new(source, 0));
+        }
         let config = ResolverConfig::from_name_servers(vec![server]);
         let mut options = ResolverOpts::default();
         options.timeout = Duration::from_secs(3);
@@ -95,7 +97,7 @@ pub async fn socket_bind_from(
             return None;
         }
     };
-    if let Err(error) = bind_selected_interface(&socket, source) {
+    if let Err(error) = bind_selected_interface(&socket2::SockRef::from(&socket), source) {
         error!("Cannot bind DrCOM physical interface: {error}");
         return None;
     }
@@ -127,7 +129,29 @@ impl RuntimeProvider for InterfaceRuntime {
         source: Option<SocketAddr>,
         timeout: Option<Duration>,
     ) -> std::pin::Pin<Box<dyn Send + std::future::Future<Output = io::Result<Self::Tcp>>>> {
-        self.0.connect_tcp(server, source, timeout)
+        Box::pin(async move {
+            let socket = if server.is_ipv4() {
+                tokio::net::TcpSocket::new_v4()?
+            } else {
+                tokio::net::TcpSocket::new_v6()?
+            };
+            if let Some(source) = source {
+                socket.bind(source)?;
+                bind_selected_interface(&socket2::SockRef::from(&socket), source.ip())?;
+            }
+            socket.set_nodelay(true)?;
+            let stream = tokio::time::timeout(
+                timeout.unwrap_or(Duration::from_secs(5)),
+                socket.connect(server),
+            )
+            .await
+            .map_err(|_| {
+                io::Error::new(io::ErrorKind::TimedOut, "DNS TCP connection timed out")
+            })??;
+            Ok(hickory_resolver::net::runtime::iocompat::AsyncIoTokioAsStd(
+                stream,
+            ))
+        })
     }
 
     fn bind_udp(
@@ -137,7 +161,7 @@ impl RuntimeProvider for InterfaceRuntime {
     ) -> std::pin::Pin<Box<dyn Send + std::future::Future<Output = io::Result<Self::Udp>>>> {
         Box::pin(async move {
             let socket = UdpSocket::bind(source).await?;
-            bind_selected_interface(&socket, source.ip())?;
+            bind_selected_interface(&socket2::SockRef::from(&socket), source.ip())?;
             Ok(socket)
         })
     }
@@ -172,7 +196,7 @@ fn selected_interface(
 }
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
-fn bind_selected_interface(socket: &UdpSocket, source: IpAddr) -> io::Result<()> {
+fn bind_selected_interface(socket: &socket2::SockRef<'_>, source: IpAddr) -> io::Result<()> {
     if source.is_unspecified() || source.is_loopback() {
         return Ok(());
     }
@@ -180,11 +204,11 @@ fn bind_selected_interface(socket: &UdpSocket, source: IpAddr) -> io::Result<()>
     let interface = selected_interface(source, &interfaces)?;
     // Raw Ethernet authentication already needs capture privileges. Use the same
     // device for IP packets too instead of changing system routing or Wi-Fi state.
-    socket2::SockRef::from(socket).bind_device(Some(interface.name.as_bytes()))
+    socket.bind_device(Some(interface.name.as_bytes()))
 }
 
 #[cfg(target_os = "macos")]
-fn bind_selected_interface(socket: &UdpSocket, source: IpAddr) -> io::Result<()> {
+fn bind_selected_interface(socket: &socket2::SockRef<'_>, source: IpAddr) -> io::Result<()> {
     if source.is_unspecified() {
         return Ok(());
     }
@@ -199,7 +223,7 @@ fn bind_selected_interface(socket: &UdpSocket, source: IpAddr) -> io::Result<()>
     // Binding the source IPv4 alone does not constrain Darwin's egress route.
     // IP_BOUND_IF keeps campus DNS and DrCOM traffic on the selected Ethernet
     // link even when Wi-Fi or a VPN supplies the system's preferred route.
-    socket2::SockRef::from(socket).bind_device_by_index_v4(Some(index))
+    socket.bind_device_by_index_v4(Some(index))
 }
 
 #[cfg(not(any(
@@ -208,12 +232,12 @@ fn bind_selected_interface(socket: &UdpSocket, source: IpAddr) -> io::Result<()>
     target_os = "android",
     target_os = "macos"
 )))]
-fn bind_selected_interface(_socket: &UdpSocket, _source: IpAddr) -> io::Result<()> {
+fn bind_selected_interface(_socket: &socket2::SockRef<'_>, _source: IpAddr) -> io::Result<()> {
     Ok(())
 }
 
 #[cfg(windows)]
-fn bind_selected_interface(socket: &UdpSocket, source: IpAddr) -> io::Result<()> {
+fn bind_selected_interface(socket: &socket2::SockRef<'_>, source: IpAddr) -> io::Result<()> {
     use std::os::windows::io::AsRawSocket;
     use windows_sys::Win32::Networking::WinSock::{
         IP_UNICAST_IF, IPPROTO_IP, SOCKET_ERROR, WSAGetLastError, setsockopt,
@@ -386,6 +410,64 @@ mod tests {
             Some((IpAddr::V4(Ipv4Addr::new(127, 0, 0, 7)), address))
         );
         task.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn truncated_dns_retries_tcp_on_the_configured_port_and_source() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let udp = UdpSocket::bind(address).await.unwrap();
+        #[cfg(windows)]
+        let source = IpAddr::V4(Ipv4Addr::LOCALHOST);
+        #[cfg(not(windows))]
+        let source = loopback_source();
+        fn reply(query: &[u8], truncated: bool) -> Vec<u8> {
+            let mut end = 12;
+            while query[end] != 0 {
+                end += query[end] as usize + 1;
+            }
+            end += 5;
+            let mut result = query[..end].to_vec();
+            result[2..4].copy_from_slice(&[if truncated { 0x83 } else { 0x81 }, 0x80]);
+            result[6..12].fill(0);
+            if !truncated {
+                result[6..8].copy_from_slice(&1u16.to_be_bytes());
+                result
+                    .extend_from_slice(&[0xc0, 0x0c, 0, 1, 0, 1, 0, 0, 0, 30, 0, 4, 192, 0, 2, 7]);
+            }
+            result
+        }
+        let server = tokio::spawn(async move {
+            let mut bytes = [0; 2048];
+            let (size, peer) = udp.recv_from(&mut bytes).await.unwrap();
+            assert_eq!(peer.ip(), source);
+            udp.send_to(&reply(&bytes[..size], true), peer)
+                .await
+                .unwrap();
+            let (mut stream, peer) = listener.accept().await.unwrap();
+            assert_eq!(
+                peer.ip(),
+                source,
+                "TCP fallback must retain the selected source"
+            );
+            let length = stream.read_u16().await.unwrap() as usize;
+            let mut query = vec![0; length];
+            stream.read_exact(&mut query).await.unwrap();
+            let response = reply(&query, false);
+            stream.write_u16(response.len() as u16).await.unwrap();
+            stream.write_all(&response).await.unwrap();
+        });
+        let settings = Settings {
+            host: "truncated.test.".into(),
+            dns: vec![address],
+            ..Default::default()
+        };
+        let result = timeout(Duration::from_secs(5), resolve_dns_from(&settings, source))
+            .await
+            .unwrap();
+        assert_eq!(result, Some(("192.0.2.7".parse().unwrap(), address)));
+        server.await.unwrap();
     }
 
     #[tokio::test]
