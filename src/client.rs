@@ -116,6 +116,29 @@ async fn shutdown(receiver: &mut watch::Receiver<bool>) {
     }
 }
 
+/// Keep the retry deadline unless the selected interface becomes ready again.
+async fn wait_for_retry(
+    delay: Duration,
+    mut was_ready: bool,
+    mut interface_ready: impl FnMut() -> bool,
+) {
+    let deadline = sleep(delay);
+    tokio::pin!(deadline);
+    let mut checks = tokio::time::interval(Duration::from_secs(5));
+    loop {
+        tokio::select! {
+            _ = &mut deadline => return,
+            _ = checks.tick() => {
+                let ready = interface_ready();
+                if !was_ready && ready {
+                    return;
+                }
+                was_ready = ready;
+            }
+        }
+    }
+}
+
 async fn open(settings: &Settings, preferred: Option<&str>) -> Result<device::Device, String> {
     let name = settings
         .interface
@@ -194,12 +217,22 @@ async fn run_connection(
             false,
             false,
         )?;
+        let interface_ready =
+            || device::selected_interface_ready(preferred.as_deref(), settings.mac, settings.ip);
+        let was_ready = interface_ready();
         let device = tokio::select! {
             _ = shutdown(&mut stop) => return Ok(()),
             result = open(&settings, preferred.as_deref()) => match result {
                 Ok(device) => Arc::new(device),
                 Err(error) if settings.once => return Err(error),
-                Err(error) => { error!("{error}"); tokio::select! { _ = shutdown(&mut stop) => return Ok(()), _ = sleep(backoff.delay()) => () } continue; }
+                Err(error) => {
+                    error!("{error}");
+                    tokio::select! {
+                        _ = shutdown(&mut stop) => return Ok(()),
+                        _ = wait_for_retry(backoff.delay(), was_ready, interface_ready) => ()
+                    }
+                    continue;
+                }
             }
         };
         let name = device.interface.name.clone();
@@ -289,7 +322,13 @@ async fn run_connection(
                 if established {
                     backoff.reset();
                 }
-                tokio::select! { _ = shutdown(&mut stop) => return Ok(()), _ = sleep(backoff.delay()) => () }
+                let interface_ready =
+                    || device::selected_interface_ready(Some(&name), settings.mac, settings.ip);
+                let was_ready = interface_ready();
+                tokio::select! {
+                    _ = shutdown(&mut stop) => return Ok(()),
+                    _ = wait_for_retry(backoff.delay(), was_ready, interface_ready) => ()
+                }
             }
         }
     }
@@ -554,6 +593,61 @@ async fn run_portal(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn retry_wait_ends_when_the_interface_recovers() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let ready = Arc::new(AtomicBool::new(true));
+        let observed = ready.clone();
+        let start = tokio::time::Instant::now();
+        let waiting = tokio::spawn(wait_for_retry(Duration::from_secs(300), true, move || {
+            observed.load(Ordering::SeqCst)
+        }));
+        tokio::task::yield_now().await;
+        tokio::time::advance(Duration::from_secs(1)).await;
+        ready.store(false, Ordering::SeqCst);
+        tokio::time::advance(Duration::from_secs(4)).await;
+        tokio::task::yield_now().await;
+        assert!(!waiting.is_finished());
+        tokio::time::advance(Duration::from_secs(1)).await;
+        ready.store(true, Ordering::SeqCst);
+        tokio::time::advance(Duration::from_secs(4)).await;
+        waiting.await.unwrap();
+        assert_eq!(start.elapsed(), Duration::from_secs(10));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn retry_wait_keeps_its_deadline_without_a_recovery() {
+        for ready in [false, true] {
+            let start = tokio::time::Instant::now();
+            wait_for_retry(Duration::from_secs(300), ready, || ready).await;
+            assert_eq!(start.elapsed(), Duration::from_secs(300));
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn retry_wait_detects_recovery_during_the_failed_open_attempt() {
+        let start = tokio::time::Instant::now();
+        wait_for_retry(Duration::from_secs(300), false, || true).await;
+        assert_eq!(start.elapsed(), Duration::ZERO);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn retry_wait_remains_cancellable() {
+        let (stop, mut receiver) = watch::channel(false);
+        let waiting = tokio::spawn(async move {
+            tokio::select! {
+                _ = shutdown(&mut receiver) => (),
+                _ = wait_for_retry(Duration::from_secs(300), false, || false) => {
+                    panic!("retry deadline elapsed before shutdown");
+                }
+            }
+        });
+        tokio::task::yield_now().await;
+        stop.send(true).unwrap();
+        waiting.await.unwrap();
+    }
+
     #[test]
     fn backoff_caps_resets_and_cannot_overflow() {
         let mut delay = Backoff::new(15, 100);
