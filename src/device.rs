@@ -401,6 +401,16 @@ fn select_interface(
     Ok((interface, ip_net))
 }
 
+/// Apply the normal interface selection without opening a capture handle.
+pub(crate) fn selected_interface_ready(
+    name: Option<&str>,
+    mac: Option<MacAddr>,
+    ip: Option<IpAddr>,
+) -> bool {
+    select_interface(get_all_interfaces(), name, mac, ip)
+        .is_ok_and(|(interface, _)| interface.is_up())
+}
+
 /// Inspect inventory only: no capture handle, credentials or network traffic.
 pub fn current_ipv4(name: &str) -> Option<Ipv4Addr> {
     get_all_interfaces()
